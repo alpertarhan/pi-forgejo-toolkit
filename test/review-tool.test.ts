@@ -55,7 +55,7 @@ function fakeRuntime(heads: string[]) {
     client: () => ({ request } as unknown as ForgejoClient),
     draftKey: () => "work:acme/app!9",
     drafts,
-    dashboard: { refresh: vi.fn(async () => undefined) },
+    dashboard: { refresh: vi.fn(async () => undefined), refreshIfObserved: vi.fn(async () => undefined) },
   } as unknown as ForgejoRuntime;
   return { runtime, request, drafts };
 }

@@ -1,6 +1,34 @@
 import { describe, expect, it, vi } from "vitest";
-import { CredentialError, FgjCredentialProvider } from "../src/credentials.js";
+import { CredentialError, EnvironmentCredentialProvider, FgjCredentialProvider } from "../src/credentials.js";
 import type { CommandExecutor, CommandResult } from "../src/process.js";
+
+describe("EnvironmentCredentialProvider", () => {
+  it("reads an API token directly from the configured environment without invoking a CLI", async () => {
+    const provider = new EnvironmentCredentialProvider("work", "FORGEJO_WORK_TOKEN", {
+      FORGEJO_WORK_TOKEN: "api-token",
+    });
+
+    expect(provider.kind).toBe("env");
+    await expect(provider.getToken()).resolves.toBe("api-token");
+    provider.clear();
+    await expect(provider.getToken()).resolves.toBe("api-token");
+  });
+
+  it("rejects missing or whitespace-bearing token values without exposing them", async () => {
+    const missing = new EnvironmentCredentialProvider("work", "FORGEJO_WORK_TOKEN", {});
+    const invalid = new EnvironmentCredentialProvider("work", "FORGEJO_WORK_TOKEN", {
+      FORGEJO_WORK_TOKEN: "secret token",
+    });
+
+    await expect(missing.getToken()).rejects.toThrow("FORGEJO_WORK_TOKEN is not set");
+    await expect(invalid.getToken()).rejects.toSatisfy((error: unknown) => {
+      expect(error).toBeInstanceOf(CredentialError);
+      expect((error as Error).message).toContain("FORGEJO_WORK_TOKEN is invalid");
+      expect((error as Error).message).not.toContain("secret token");
+      return true;
+    });
+  });
+});
 
 describe("FgjCredentialProvider", () => {
   it("loads a token once, keeps it out of process arguments, and reloads after clear", async () => {

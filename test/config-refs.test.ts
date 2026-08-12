@@ -32,6 +32,25 @@ describe("Forgejo configuration", () => {
     });
   });
 
+  it("accepts explicit CLI-independent API tokens through the environment provider", () => {
+    const config = parseConfig({
+      servers: {
+        work: {
+          hostname: "forgejo.work.example",
+          credentialProvider: "env",
+          tokenEnv: "FORGEJO_WORK_TOKEN",
+        },
+      },
+    });
+
+    expect(config.servers.work).toMatchObject({
+      baseUrl: "https://forgejo.work.example",
+      credentialProvider: "env",
+      tokenEnv: "FORGEJO_WORK_TOKEN",
+    });
+  });
+
+
   it("merges project overrides without dropping global servers", () => {
     const config = parseConfig(BASE_CONFIG, {
       servers: {
@@ -59,6 +78,32 @@ describe("Forgejo configuration", () => {
         },
       }),
     ).toThrow(ConfigError);
+  });
+
+  it("rejects credential fields belonging to another provider", () => {
+    expect(() =>
+      parseConfig({
+        servers: {
+          work: {
+            hostname: "forgejo.work.example",
+            credentialProvider: "env",
+            tokenEnv: "FORGEJO_WORK_TOKEN",
+            fgjConfig: "/tmp/fgj.yaml",
+          },
+        },
+      }),
+    ).toThrow("fgjConfig cannot be used with credentialProvider 'env'");
+    expect(() =>
+      parseConfig({
+        servers: {
+          work: {
+            hostname: "forgejo.work.example",
+            credentialProvider: "fgj",
+            tokenEnv: "FORGEJO_WORK_TOKEN",
+          },
+        },
+      }),
+    ).toThrow("tokenEnv cannot be used with credentialProvider 'fgj'");
   });
 });
 

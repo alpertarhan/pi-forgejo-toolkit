@@ -101,7 +101,7 @@ function fakeRuntime(options: FixtureOptions = {}) {
     resolveRepo: () => ({ server: "work", owner: "acme", repo: "app" }),
     resolveResource: () => ref,
     client: () => ({ request } as unknown as ForgejoClient),
-    dashboard: { refresh },
+    dashboard: { refresh, refreshIfObserved: refresh },
   } as unknown as ForgejoRuntime;
   return { runtime, request, refresh };
 }

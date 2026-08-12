@@ -80,6 +80,8 @@ export class DashboardStore {
   private controller?: AbortController;
   private generation = 0;
   private closed = false;
+  private invalidationVersion = 0;
+  private refreshedVersion = 0;
 
   constructor(
     private readonly clients: ForgejoClientPool,
@@ -114,6 +116,7 @@ export class DashboardStore {
       const { activeRepo: _removed, ...snapshot } = this.snapshotValue;
       this.snapshotValue = snapshot;
     }
+    this.invalidationVersion += 1;
     this.recalculate();
   }
 
@@ -126,6 +129,19 @@ export class DashboardStore {
     for (const listener of this.listeners) listener();
   }
 
+  async ensureFresh(externalSignal?: AbortSignal): Promise<DashboardSnapshot> {
+    if (!this.snapshotValue.fetchedAt || this.refreshedVersion !== this.invalidationVersion) {
+      return this.refresh(externalSignal);
+    }
+    return this.snapshotValue;
+  }
+
+  async refreshIfObserved(externalSignal?: AbortSignal): Promise<DashboardSnapshot> {
+    this.invalidationVersion += 1;
+    if (this.listeners.size === 0) return this.snapshotValue;
+    return this.refresh(externalSignal);
+  }
+
   async refresh(externalSignal?: AbortSignal): Promise<DashboardSnapshot> {
     if (this.closed) throw new Error("dashboard store is closed");
     this.controller?.abort();
@@ -136,6 +152,7 @@ export class DashboardStore {
       else externalSignal.addEventListener("abort", () => controller.abort(externalSignal.reason), { once: true });
     }
     const generation = ++this.generation;
+    const invalidationVersion = this.invalidationVersion;
     this.snapshotValue = { ...this.snapshotValue, refreshing: true };
     this.recalculate();
 
@@ -180,6 +197,7 @@ export class DashboardStore {
     );
 
     if (generation === this.generation) {
+      this.refreshedVersion = invalidationVersion;
       this.snapshotValue = {
         ...this.snapshotValue,
         fetchedAt: new Date().toISOString(),

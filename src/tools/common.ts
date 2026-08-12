@@ -6,6 +6,14 @@ import type { ForgejoComment, ForgejoPullReview, ForgejoPullReviewComment, Forge
 
 export type RuntimeProvider = () => ForgejoRuntime;
 
+export const DEFAULT_MODEL_OUTPUT_BYTES = 32_000;
+export const DEFAULT_LARGE_MODEL_OUTPUT_BYTES = 64_000;
+export const MAX_MODEL_OUTPUT_BYTES = 128_000;
+
+export function modelOutputBytes(description = "Maximum model-visible output bytes; default 32 KB") {
+  return Type.Optional(Type.Integer({ minimum: 1_000, maximum: MAX_MODEL_OUTPUT_BYTES, description }));
+}
+
 export async function authenticatedUserName(runtime: ForgejoRuntime, server: string, signal?: AbortSignal): Promise<string> {
   const discovered = runtime.capabilities.get(server)?.user.login;
   if (discovered) return discovered;
@@ -26,10 +34,46 @@ export const resourceTargetProperties = {
   index: Type.Optional(Type.Integer({ minimum: 1, description: "Issue or pull request number" })),
 };
 
+const MAX_PERSISTED_TOOL_DETAILS_BYTES = 16_000;
+const MAX_COMPACT_DETAIL_VALUE_BYTES = 1_000;
+const MAX_COMPACT_DETAIL_FIELDS = 12;
+
+function compactPersistedToolDetails(data: unknown): unknown {
+  let serialized: string | undefined;
+  try {
+    serialized = JSON.stringify(data);
+  } catch {
+    return { detailsTruncated: true, detailsReason: "not JSON-serializable" };
+  }
+  if (serialized === undefined) return data;
+  const originalBytes = Buffer.byteLength(serialized, "utf8");
+  if (originalBytes <= MAX_PERSISTED_TOOL_DETAILS_BYTES) return data;
+
+  const compact: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
+  let compactFields = 0;
+  if (typeof data === "object" && data !== null && !Array.isArray(data)) {
+    for (const [key, value] of Object.entries(data)) {
+      if (compactFields >= MAX_COMPACT_DETAIL_FIELDS) break;
+      if (Buffer.byteLength(key, "utf8") > 128) continue;
+      try {
+        const candidate = JSON.stringify(value);
+        if (candidate !== undefined && Buffer.byteLength(candidate, "utf8") <= MAX_COMPACT_DETAIL_VALUE_BYTES) {
+          compact[key] = value;
+          compactFields += 1;
+        }
+      } catch {
+        // Skip only the non-serializable field; the compact envelope remains usable.
+      }
+    }
+  }
+  return { ...compact, detailsTruncated: true, detailsOriginalBytes: originalBytes };
+}
+
+
 export function toolResult(summary: string, data: unknown): { content: Array<{ type: "text"; text: string }>; details: { data: unknown } } {
   return {
     content: [{ type: "text", text: summary }],
-    details: { data },
+    details: { data: compactPersistedToolDetails(data) },
   };
 }
 

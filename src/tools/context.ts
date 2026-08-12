@@ -26,8 +26,8 @@ export function registerContextTools(pi: ExtensionAPI, runtimeProvider: RuntimeP
   pi.registerTool({
     name: "forgejo_context",
     label: "Forgejo Context",
-    description: "Inspect or select configured Forgejo servers and resolve server-qualified issue or pull references.",
-    promptSnippet: "Inspect the active Forgejo server, repository, identity, health, or capabilities",
+    description: "Resolve Forgejo server, repository, identity, health, capabilities, or qualified refs.",
+    promptSnippet: "Resolve Forgejo context and references",
     parameters: Type.Object({
       action: StringEnum(["current", "servers", "select", "whoami", "health", "capabilities", "resolve_ref"] as const),
       server: Type.Optional(Type.String({ description: "Configured server alias; required for select" })),
@@ -55,7 +55,7 @@ export function registerContextTools(pi: ExtensionAPI, runtimeProvider: RuntimeP
       if (params.action === "select") {
         if (!params.server) throw new Error("server is required for select");
         const repo = runtime.selectServer(params.server);
-        await runtime.dashboard.refresh(signal);
+        await runtime.dashboard.refreshIfObserved(signal);
         return toolResult(
           repo ? `Selected ${formatRepoRef(repo)}` : `Selected Forgejo server ${params.server}; provide owner/repo for repository operations`,
           { server: params.server, repo },
@@ -116,8 +116,7 @@ export function registerContextTools(pi: ExtensionAPI, runtimeProvider: RuntimeP
   pi.registerTool({
     name: "forgejo_dashboard",
     label: "Forgejo Dashboard",
-    description: "Read the shared multi-server dashboard for assigned issues, authored pull requests, review requests, failed CI, and unread notifications.",
-    promptSnippet: "Read or refresh the user's Forgejo attention queue across configured servers",
+    description: "Read the multi-server attention dashboard: issues, PRs, reviews, failed CI, and notifications.",
     parameters: Type.Object({
       action: StringEnum(["get", "refresh", "get_attention_items", "get_assigned_issues", "get_authored_pulls", "get_review_requests", "get_failed_runs"] as const),
       server: Type.Optional(Type.String({ description: "Limit results to one server alias" })),
@@ -125,7 +124,8 @@ export function registerContextTools(pi: ExtensionAPI, runtimeProvider: RuntimeP
     }),
     async execute(_toolCallId, params, signal) {
       const runtime = runtimeProvider();
-      if (params.action === "refresh" || !runtime.dashboard.snapshot().fetchedAt) await runtime.dashboard.refresh(signal);
+      if (params.action === "refresh") await runtime.dashboard.refresh(signal);
+      else await runtime.dashboard.ensureFresh(signal);
       const snapshot = runtime.dashboard.snapshot();
       const serverValues = Object.values(snapshot.servers).filter((server) => !params.server || server.alias === params.server);
       if (params.server && serverValues.length === 0) throw new Error(`unknown Forgejo server '${params.server}'`);

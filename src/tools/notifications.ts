@@ -3,7 +3,7 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { apiPath } from "../client.js";
 import type { ForgejoComment, ForgejoNotification } from "../types.js";
-import { assertForgejoCommentTarget, boundModelText, confirmMutation, formatForgejoComment, positiveLimit, toolResult, type RuntimeProvider } from "./common.js";
+import { assertForgejoCommentTarget, boundModelText, confirmMutation, DEFAULT_MODEL_OUTPUT_BYTES, formatForgejoComment, modelOutputBytes, positiveLimit, toolResult, type RuntimeProvider } from "./common.js";
 
 interface NotificationTarget {
   owner: string;
@@ -118,14 +118,13 @@ export function registerNotificationTool(pi: ExtensionAPI, runtimeProvider: Runt
     name: "forgejo_notifications",
     label: "Forgejo Notifications",
     description: "List and update notification threads on one or all configured Forgejo servers.",
-    promptSnippet: "Read or mark Forgejo notification threads across configured servers",
     parameters: Type.Object({
       action: StringEnum(["list", "get", "mark_read", "mark_unread", "mark_all_read"] as const),
       server: Type.Optional(Type.String({ description: "Server alias; list and mark_all_read may span all servers" })),
       id: Type.Optional(Type.Integer({ minimum: 1, description: "Notification thread ID" })),
       page: Type.Optional(Type.Integer({ minimum: 1 })),
       limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })),
-      max_bytes: Type.Optional(Type.Integer({ minimum: 1000, maximum: 1000000 })),
+      max_bytes: modelOutputBytes(),
       resolve_latest: Type.Optional(Type.Boolean({ description: "For get, securely fetch and render the latest issue or pull-request comment" })),
       subject_type: Type.Optional(StringEnum(["issue", "pull", "repository"] as const)),
     }),
@@ -176,7 +175,7 @@ export function registerNotificationTool(pi: ExtensionAPI, runtimeProvider: Runt
                 ],
           )
           .join("\n\n");
-        const bounded = boundModelText(text || "No unread Forgejo notifications", params.max_bytes ?? 200_000);
+        const bounded = boundModelText(text || "No unread Forgejo notifications", params.max_bytes ?? DEFAULT_MODEL_OUTPUT_BYTES);
         const errors = Object.fromEntries(
           outcomes.flatMap((result) => (result.error ? [[result.server, result.error]] : [])),
         );
@@ -206,7 +205,7 @@ export function registerNotificationTool(pi: ExtensionAPI, runtimeProvider: Runt
             }
           }),
         );
-        await runtime.dashboard.refresh(signal);
+        await runtime.dashboard.refreshIfObserved(signal);
         const succeeded = outcomes.flatMap((result) => (result.error ? [] : [result.server]));
         const errors = Object.fromEntries(
           outcomes.flatMap((result) => (result.error ? [[result.server, result.error]] : [])),
@@ -240,7 +239,7 @@ export function registerNotificationTool(pi: ExtensionAPI, runtimeProvider: Runt
             text = `${text}\n\nLatest comment: none; this notification was updated without a comment URL`;
           }
         }
-        const bounded = boundModelText(text, params.max_bytes ?? 200_000);
+        const bounded = boundModelText(text, params.max_bytes ?? DEFAULT_MODEL_OUTPUT_BYTES);
         return toolResult(bounded.text, {
           notification: response.data,
           latestComment,
@@ -255,7 +254,7 @@ export function registerNotificationTool(pi: ExtensionAPI, runtimeProvider: Runt
         method: "PATCH",
         query: { "to-status": status },
       });
-      await runtime.dashboard.refresh(signal);
+      await runtime.dashboard.refreshIfObserved(signal);
       return toolResult(`Marked ${alias} notification ${params.id} ${status}`, response.data);
     },
   });

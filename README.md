@@ -37,7 +37,7 @@ Restart Pi or run `/reload`, then create a configuration:
 /fj-setup
 ```
 
-`/fj-setup` discovers instances already authenticated in [`fgj`](https://codeberg.org/forgejo-contrib/forgejo-cli), lets you review the generated JSON, and asks before writing it.
+`/fj-setup` discovers instances already authenticated in [`fgj`](https://codeberg.org/forgejo-contrib/forgejo-cli), lets you review the generated JSON, and asks before writing it. It is optional: API-token users can create the configuration below and never install or invoke `fgj`.
 
 Alternative package sources:
 
@@ -46,7 +46,7 @@ Alternative package sources:
 pi install git:github.com/alpertarhan/pi-forgejo-toolkit
 
 # Pin an exact npm version
-pi install npm:pi-forgejo-toolkit@0.1.0
+pi install npm:pi-forgejo-toolkit@0.2.0
 ```
 
 Update an unpinned install with:
@@ -105,9 +105,9 @@ Configuration is loaded from two locations:
 
 Set `PI_FORGEJO_CONFIG=/absolute/path/to/forgejo.json` to override the global path. Project configuration can add or replace server aliases and override dashboard fields.
 
-Plaintext token fields are rejected. Credentials must come from `fgj` or an environment variable.
+Inline plaintext token fields are rejected. Use the CLI-independent `env` provider with `tokenEnv`, or use the optional `fgj` provider.
 
-### Recommended: `fgj`
+### Optional: `fgj` credential store
 
 ```json
 {
@@ -144,7 +144,7 @@ Use `fgjConfig` when the CLI configuration is not at its default path:
 }
 ```
 
-### Environment-variable credentials
+### API token credentials (no CLI required)
 
 ```json
 {
@@ -165,7 +165,7 @@ export FORGEJO_WORK_TOKEN='...'
 pi
 ```
 
-Use a separate, least-privilege token for every server. The required Forgejo token scopes depend on the enabled operations: repository and issue reads for normal inspection; write scopes for comments and metadata; notification scopes for inbox updates; and repository permissions for Actions or merge operations.
+Use a separate, least-privilege Forgejo API token for every server. The environment provider reads only the named variable and never invokes `fgj` or another CLI. Required scopes depend on the enabled operations: repository and issue reads for normal inspection; write scopes for comments and metadata; notification scopes for inbox updates; and repository permissions for Actions or merge operations.
 
 ### Server fields
 
@@ -173,8 +173,8 @@ Use a separate, least-privilege token for every server. The required Forgejo tok
 | --- | --- | --- |
 | `baseUrl` | One of `baseUrl` or `hostname` | Absolute HTTP(S) Forgejo URL. Subpath installations are supported. |
 | `hostname` | One of `baseUrl` or `hostname` | Hostname, optionally with a port, used by `fgj` and remote matching. |
-| `credentialProvider` | No | `fgj` or `env`; defaults to `env`. |
-| `tokenEnv` | For `env` | Environment variable containing the token. |
+| `credentialProvider` | No | `env` or `fgj`; defaults to `env`. |
+| `tokenEnv` | For `env` | Environment variable containing the Forgejo API token. |
 | `fgjConfig` | No | Optional absolute or relative path passed to `fgj --config`. |
 | `remoteHosts` | No | Extra Git/SSH hostnames or SSH aliases that identify this server. |
 
@@ -227,11 +227,14 @@ The remote resolver understands HTTPS, `ssh://`, SCP-style SSH URLs, ports, `.gi
 
 ## Pi tools
 
-The package registers eight model-callable tools. Pi exposes their typed schemas to the model; users normally describe the desired operation instead of constructing JSON manually.
+The package registers nine model-callable tools. Users normally describe the desired operation instead of constructing JSON manually.
+
+By default, only `forgejo_context` and the compact `forgejo_tools` loader are active. The loader activates at most four requested issue, pull, review, Actions, notification, search, or dashboard domains per call, additively for the current session; a new session returns to the compact set. There is deliberately no "load everything" option. The bundled skills request only their required domains. This keeps seven larger schemas out of Pi's initial context and avoids rebuilding the system prompt when a domain is activated, without delaying slash commands or the TUI dashboard.
 
 | Tool | Actions |
 | --- | --- |
 | `forgejo_context` | `current`, `servers`, `select`, `whoami`, `health`, `capabilities`, `resolve_ref` |
+| `forgejo_tools` | Activate one to four Forgejo tool domains for the current session |
 | `forgejo_dashboard` | `get`, `refresh`, `get_attention_items`, `get_assigned_issues`, `get_authored_pulls`, `get_review_requests`, `get_failed_runs` |
 | `forgejo_search` | `issues`, `pulls`, `repositories`, `users` |
 | `forgejo_notifications` | `list`, `get`, `mark_read`, `mark_unread`, `mark_all_read` |
@@ -239,6 +242,8 @@ The package registers eight model-callable tools. Pi exposes their typed schemas
 | `forgejo_pull` | `list`, `get`, `timeline`, `updates`, `comment`, `get_comment`, `edit_comment`, `delete_comment`, `subscription`, `subscribe`, `unsubscribe`, `files`, `diff`, `commits`, `checks`, `create`, `update`, `set_labels`, `set_assignees`, `set_milestone`, `clear_milestone`, `set_due_date`, `clear_due_date`, `set_maintainer_edit`, `close`, `reopen`, `mark_draft`, `mark_ready`, `request_reviewers`, `remove_reviewers`, `readiness`, `merge` |
 | `forgejo_review` | `list`, `get`, `get_comments`, `create_draft`, `add_inline_comment`, `preview`, `submit`, `discard` |
 | `forgejo_actions` | `list`, `get`, `jobs`, `job_log`, `dispatch`, `cancel`, `rerun`, `artifacts`, `artifact`, `download_artifact` |
+
+Model-visible metadata and discussion output defaults to 32 KB. Pull-request diffs and Actions job logs default to 64 KB. `max_bytes` can lower either budget but is hard-capped at 128 KB; truncated timeline results retain pagination and recovery metadata. Cross-server search includes a bounded, single-line body preview; use the qualified result with `forgejo_issue` or `forgejo_pull` when the complete body is needed. Oversized hidden tool details are compacted before Pi persists them, retaining small identifiers and recovery fields rather than duplicating full remote payloads in session history. Artifact downloads use the separate `max_download_bytes` limit and write ZIP bytes to a deliberate workspace path instead of returning the archive to the model.
 
 ## Dashboard
 
@@ -251,6 +256,8 @@ The dashboard aggregates, per server:
 - Latest failed Forgejo Actions runs for the active repository
 
 One server failing does not erase healthy servers' data. Stale data and per-server errors remain visible. Notification popups can be disabled or limited to important items.
+
+Background polling runs only while the widget is visible or notification popups are enabled. With both disabled, Forgejo mutations do not trigger an otherwise unused dashboard fetch; `/fj-refresh`, `/fj`, and explicit dashboard tool reads still fetch on demand. Hiding the widget clears its status line immediately. The status line reports `syncing` during refresh and then the current attention count; `counts-only` privacy also hides the active repository there.
 
 The interactive `/fj` overlay supports filtering and action shortcuts; selecting an item pastes its fully qualified reference into the Pi editor.
 

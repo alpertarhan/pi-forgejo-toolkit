@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { ForgejoClient, ForgejoClientPool } from "../src/client.js";
 import { DashboardNotifier } from "../src/dashboard/notifier.js";
 import { DashboardStore } from "../src/dashboard/store.js";
-import { renderWidgetLines } from "../src/dashboard/widget.js";
+import { renderDashboardStatus, renderWidgetLines } from "../src/dashboard/widget.js";
 
 function jsonResponse(data: unknown, total?: number): Response {
   const headers = new Headers({ "content-type": "application/json" });
@@ -11,12 +11,12 @@ function jsonResponse(data: unknown, total?: number): Response {
   return new Response(JSON.stringify(data), { status: 200, headers });
 }
 
-function issue(number: number, title: string, pull = false): Record<string, unknown> {
+function issue(number: number, title: string, pull = false, state: "open" | "closed" = "open"): Record<string, unknown> {
   return {
     id: number,
     number,
     title,
-    state: "open",
+    state,
     html_url: `https://work.example/acme/app/${pull ? "pulls" : "issues"}/${number}`,
     updated_at: "2026-08-12T10:00:00Z",
     repository: {
@@ -29,17 +29,32 @@ function issue(number: number, title: string, pull = false): Record<string, unkn
   };
 }
 
-function dashboardFetch(state: { review: boolean; failWork: boolean }): typeof fetch {
+function dashboardFetch(state: { review: boolean; failWork: boolean; includeClosed?: boolean }): typeof fetch {
   return vi.fn<typeof fetch>(async (input) => {
     const url = new URL(String(input));
     if (url.hostname === "community.example") throw new Error("community offline");
     if (state.failWork) throw new Error("work offline");
     if (url.pathname.endsWith("/user")) return jsonResponse({ id: 7, login: "alice" });
     if (url.pathname.endsWith("/repos/issues/search")) {
-      if (url.searchParams.get("assigned") === "true") return jsonResponse([issue(10, "Assigned issue")], 4);
-      if (url.searchParams.get("created") === "true") return jsonResponse([issue(20, "Authored pull", true)], 2);
+      expect(url.searchParams.get("state")).toBe("open");
+      if (url.searchParams.get("assigned") === "true") {
+        return jsonResponse(
+          [issue(10, "Assigned issue"), ...(state.includeClosed ? [issue(11, "Closed assigned issue", false, "closed")] : [])],
+          state.includeClosed ? 5 : 4,
+        );
+      }
+      if (url.searchParams.get("created") === "true") {
+        return jsonResponse(
+          [issue(20, "Authored pull", true), ...(state.includeClosed ? [issue(21, "Closed authored pull", true, "closed")] : [])],
+          state.includeClosed ? 3 : 2,
+        );
+      }
       if (url.searchParams.get("review_requested") === "true") {
-        return jsonResponse(state.review ? [issue(30, "Review this", true)] : [], state.review ? 1 : 0);
+        const items = [
+          ...(state.review ? [issue(30, "Review this", true)] : []),
+          ...(state.includeClosed ? [issue(31, "Closed review request", true, "closed")] : []),
+        ];
+        return jsonResponse(items, items.length);
       }
     }
     if (url.pathname.endsWith("/actions/runs")) {
@@ -181,6 +196,19 @@ describe("DashboardStore", () => {
     store.close();
   });
 
+  it("excludes closed issues and pulls when a server ignores the open-state filter", async () => {
+    const state = { review: true, failWork: false, includeClosed: true };
+    const store = new DashboardStore(clients(dashboardFetch(state), false), 3);
+    await store.refresh();
+    const server = store.snapshot().servers.work;
+
+    expect(server?.assignedIssues).toMatchObject({ total: 1, items: [{ index: 10 }] });
+    expect(server?.authoredPulls).toMatchObject({ total: 1, items: [{ index: 20 }] });
+    expect(server?.reviewRequests).toMatchObject({ total: 1, items: [{ index: 30 }] });
+    expect(store.snapshot().attention.map((item) => item.index)).not.toEqual(expect.arrayContaining([11, 21, 31]));
+    store.close();
+  });
+
   it("does not notify on initial load and deduplicates later review requests", async () => {
     const state = { review: false, failWork: false };
     const store = new DashboardStore(clients(dashboardFetch(state), false), 3);
@@ -197,6 +225,46 @@ describe("DashboardStore", () => {
     await store.refresh();
     expect(notify).toHaveBeenCalledTimes(1);
     notifier.close();
+    store.close();
+  });
+
+  it("refreshes lazily until a dashboard observer exists", async () => {
+    const state = { review: false, failWork: false };
+    const store = new DashboardStore(clients(dashboardFetch(state), false), 3);
+    const refresh = vi.spyOn(store, "refresh");
+
+    await store.refreshIfObserved();
+    expect(refresh).not.toHaveBeenCalled();
+    expect(store.snapshot().fetchedAt).toBeUndefined();
+
+    const unsubscribe = store.subscribe(() => undefined);
+    await store.refreshIfObserved();
+    expect(refresh).toHaveBeenCalledOnce();
+    expect(store.snapshot().fetchedAt).toBeDefined();
+
+    unsubscribe();
+    await store.refreshIfObserved();
+    expect(refresh).toHaveBeenCalledOnce();
+    store.close();
+  });
+
+  it("refreshes dirty data once and reports status without leaking repository identity", async () => {
+    const state = { review: true, failWork: false };
+    const store = new DashboardStore(clients(dashboardFetch(state), false), 3, {
+      server: "work",
+      owner: "acme",
+      repo: "app",
+    });
+    const refresh = vi.spyOn(store, "refresh");
+    await store.ensureFresh();
+    await store.ensureFresh();
+    expect(refresh).toHaveBeenCalledOnce();
+
+    store.setActiveRepo({ server: "work", owner: "acme", repo: "app" });
+    await store.ensureFresh();
+    expect(refresh).toHaveBeenCalledTimes(2);
+    expect(renderDashboardStatus(store.snapshot(), "counts-only")).toBe("fj all · 9 attention");
+    expect(renderDashboardStatus({ ...store.snapshot(), refreshing: true }, "full")).toBe("fj work:acme/app · syncing");
     store.close();
   });
 

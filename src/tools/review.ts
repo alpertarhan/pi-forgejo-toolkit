@@ -6,6 +6,8 @@ import { formatResourceRef } from "../refs.js";
 import type { ForgejoPullRequest, ForgejoPullReview, ForgejoPullReviewComment, ReviewDraft } from "../types.js";
 import {
   boundModelText,
+  DEFAULT_MODEL_OUTPUT_BYTES,
+  modelOutputBytes,
   confirmMutation,
   formatForgejoReview,
   formatForgejoReviewComment,
@@ -36,11 +38,6 @@ export function registerReviewTool(pi: ExtensionAPI, runtimeProvider: RuntimePro
     name: "forgejo_review",
     label: "Forgejo Review",
     description: "Read complete remote reviews and inline comments or prepare an in-memory review draft. Submitting always previews and asks the user for confirmation.",
-    promptSnippet: "Read reviews and inline comments, build an inline review draft, preview it, and submit after confirmation",
-    promptGuidelines: [
-      "Use forgejo_review create_draft and preview before submit; never publish review comments during analysis.",
-      "Use forgejo_review submit only after completing the whole review and showing its findings to the user.",
-    ],
     parameters: Type.Object({
       action: StringEnum(["list", "get", "get_comments", "create_draft", "add_inline_comment", "preview", "submit", "discard"] as const),
       ...resourceTargetProperties,
@@ -52,7 +49,7 @@ export function registerReviewTool(pi: ExtensionAPI, runtimeProvider: RuntimePro
       old_position: Type.Optional(Type.Integer({ minimum: 1 })),
       page: Type.Optional(Type.Integer({ minimum: 1 })),
       limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })),
-      max_bytes: Type.Optional(Type.Integer({ minimum: 1000, maximum: 1000000 })),
+      max_bytes: modelOutputBytes(),
     }),
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       const runtime = runtimeProvider();
@@ -74,7 +71,7 @@ export function registerReviewTool(pi: ExtensionAPI, runtimeProvider: RuntimePro
           ...response.data.map(formatForgejoReview),
           `Page: ${page}`,
         ].join("\n\n");
-        const bounded = boundModelText(text, params.max_bytes ?? 200_000);
+        const bounded = boundModelText(text, params.max_bytes ?? DEFAULT_MODEL_OUTPUT_BYTES);
         return toolResult(bounded.text, {
           items: response.data,
           total: response.totalCount ?? response.data.length,
@@ -93,7 +90,7 @@ export function registerReviewTool(pi: ExtensionAPI, runtimeProvider: RuntimePro
             `Review ${params.review_id} inline comments for ${reference}: ${response.data.length}`,
             ...response.data.map(formatForgejoReviewComment),
           ].join("\n\n");
-          const bounded = boundModelText(text, params.max_bytes ?? 200_000);
+          const bounded = boundModelText(text, params.max_bytes ?? DEFAULT_MODEL_OUTPUT_BYTES);
           return toolResult(bounded.text, {
             reviewId: params.review_id,
             comments: response.data,
@@ -111,7 +108,7 @@ export function registerReviewTool(pi: ExtensionAPI, runtimeProvider: RuntimePro
           `Inline comments (${comments.data.length}):`,
           comments.data.length > 0 ? comments.data.map(formatForgejoReviewComment).join("\n\n") : "(none)",
         ].join("\n\n");
-        const bounded = boundModelText(text, params.max_bytes ?? 200_000);
+        const bounded = boundModelText(text, params.max_bytes ?? DEFAULT_MODEL_OUTPUT_BYTES);
         return toolResult(bounded.text, {
           review: review.data,
           comments: comments.data,
@@ -185,7 +182,7 @@ export function registerReviewTool(pi: ExtensionAPI, runtimeProvider: RuntimePro
         },
       });
       runtime.drafts.delete(key);
-      await runtime.dashboard.refresh(signal);
+      await runtime.dashboard.refreshIfObserved(signal);
       return toolResult(`Submitted ${draft.verdict} review for ${reference}`, response.data);
     },
   });

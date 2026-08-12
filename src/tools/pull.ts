@@ -22,6 +22,9 @@ import {
   authenticatedUserName,
   boundModelText,
   boundModelTextWithSuffix,
+  DEFAULT_LARGE_MODEL_OUTPUT_BYTES,
+  DEFAULT_MODEL_OUTPUT_BYTES,
+  modelOutputBytes,
   confirmMutation,
   formatForgejoComment,
   formatForgejoReview,
@@ -295,12 +298,7 @@ export function registerPullTool(pi: ExtensionAPI, runtimeProvider: RuntimeProvi
   pi.registerTool({
     name: "forgejo_pull",
     label: "Forgejo Pull Request",
-    description: "List, inspect, discuss, manage comments, subscriptions, review requests, labels, assignees, milestones, due dates, maintainer editing, diff, lifecycle, and safe merges for Forgejo pull requests, including paginated and incremental timelines.",
-    promptSnippet: "Read pull request metadata, discussion, timeline, incremental updates, subscription state, review requests, files, commits, checks, readiness, or manage lifecycle, planning metadata, comments, and safe merges",
-    promptGuidelines: [
-      "Use forgejo_pull close only after the user explicitly requests closing the pull request.",
-      "Marking a draft pull request ready requires interactive confirmation because it signals review readiness.",
-    ],
+    description: "Inspect and manage server-qualified Forgejo pull requests, discussions, reviews, checks, diffs, metadata, lifecycle, and guarded merges. Close only when explicitly requested; mark_ready and merge require confirmation.",
     parameters: Type.Object({
       action: StringEnum(["list", "get", "timeline", "updates", "comment", "get_comment", "edit_comment", "delete_comment", "subscription", "subscribe", "unsubscribe", "files", "diff", "commits", "checks", "create", "update", "set_labels", "set_assignees", "set_milestone", "clear_milestone", "set_due_date", "clear_due_date", "set_maintainer_edit", "close", "reopen", "mark_draft", "mark_ready", "request_reviewers", "remove_reviewers", "readiness", "merge"] as const),
       ...resourceTargetProperties,
@@ -324,7 +322,7 @@ export function registerPullTool(pi: ExtensionAPI, runtimeProvider: RuntimeProvi
       max_pages: Type.Optional(Type.Integer({ minimum: 1, maximum: 100, description: "Maximum timeline pages scanned by updates before withholding cursor advancement" })),
       since: Type.Optional(Type.String({ description: "RFC 3339 lower timestamp bound for timeline entries" })),
       before: Type.Optional(Type.String({ description: "RFC 3339 upper timestamp bound for timeline entries" })),
-      max_bytes: Type.Optional(Type.Integer({ minimum: 1000, maximum: 1000000 })),
+      max_bytes: modelOutputBytes("Maximum model-visible output bytes; default 32 KB, or 64 KB for diff"),
       merge_method: Type.Optional(StringEnum(["merge", "squash", "rebase", "rebase-merge", "fast-forward-only"] as const)),
       delete_branch: Type.Optional(Type.Boolean({ description: "Delete the source branch after a successful merge" })),
     }),
@@ -356,7 +354,7 @@ export function registerPullTool(pi: ExtensionAPI, runtimeProvider: RuntimeProvi
           method: "POST",
           body: { title, head: params.head, base: params.base, body: params.body ?? "" },
         });
-        await runtime.dashboard.refresh(signal);
+        await runtime.dashboard.refreshIfObserved(signal);
         const reference = `${repo.server}:${repo.owner}/${repo.repo}!${response.data.number}`;
         return toolResult(pullSummary("Created", response.data, reference), response.data);
       }
@@ -373,7 +371,7 @@ export function registerPullTool(pi: ExtensionAPI, runtimeProvider: RuntimeProvi
           method: "POST",
           body: { body: params.body },
         });
-        await runtime.dashboard.refresh(signal);
+        await runtime.dashboard.refreshIfObserved(signal);
         return toolResult(`Commented on ${reference}\n\n${formatForgejoComment(response.data)}`, response.data);
       }
       if (params.action === "get_comment" || params.action === "edit_comment" || params.action === "delete_comment") {
@@ -393,7 +391,7 @@ export function registerPullTool(pi: ExtensionAPI, runtimeProvider: RuntimeProvi
             method: "PATCH",
             body: { body: params.body },
           });
-          await runtime.dashboard.refresh(signal);
+          await runtime.dashboard.refreshIfObserved(signal);
           return toolResult(`Edited comment ${params.comment_id} on ${reference}\n\n${formatForgejoComment(response.data)}`, response.data);
         }
         const preview = boundModelText(current.data.body || "(empty)", 2_000);
@@ -406,7 +404,7 @@ export function registerPullTool(pi: ExtensionAPI, runtimeProvider: RuntimeProvi
           ...requestOptions,
           method: "DELETE",
         });
-        await runtime.dashboard.refresh(signal);
+        await runtime.dashboard.refreshIfObserved(signal);
         return toolResult(`Deleted comment ${params.comment_id} from ${reference}`, {
           reference,
           commentId: params.comment_id,
@@ -433,7 +431,7 @@ export function registerPullTool(pi: ExtensionAPI, runtimeProvider: RuntimeProvi
         if (response.data.subscribed !== expected) {
           throw new Error(`Forgejo did not ${expected ? "subscribe to" : "unsubscribe from"} ${reference}`);
         }
-        await runtime.dashboard.refresh(signal);
+        await runtime.dashboard.refreshIfObserved(signal);
         return toolResult(`${expected ? "Subscribed to" : "Unsubscribed from"} ${reference} as @${user}`, {
           user,
           ...response.data,
@@ -447,7 +445,7 @@ export function registerPullTool(pi: ExtensionAPI, runtimeProvider: RuntimeProvi
           ...requestOptions,
           query: { page, limit, since: params.since, before: params.before },
         });
-        return timelineToolResult(reference, response.data, page, limit, response.totalCount, params.max_bytes ?? 200_000);
+        return timelineToolResult(reference, response.data, page, limit, response.totalCount, params.max_bytes ?? DEFAULT_MODEL_OUTPUT_BYTES);
       }
       if (params.action === "updates") {
         return incrementalConversationUpdates<ForgejoPullRequest>(runtime, ref, {
@@ -455,7 +453,7 @@ export function registerPullTool(pi: ExtensionAPI, runtimeProvider: RuntimeProvi
           timelinePath: apiPath("repos", ref.owner, ref.repo, "issues", ref.index, "timeline"),
           pageLimit: positiveLimit(params.limit, 50),
           maxPages: positiveLimit(params.max_pages, 20, 100),
-          maximumBytes: params.max_bytes ?? 200_000,
+          maximumBytes: params.max_bytes ?? DEFAULT_MODEL_OUTPUT_BYTES,
           headSha: (pull) => pull.head.sha,
           ...(params.since === undefined ? {} : { since: params.since }),
           ...(signal === undefined ? {} : { signal }),
@@ -475,7 +473,7 @@ export function registerPullTool(pi: ExtensionAPI, runtimeProvider: RuntimeProvi
           page,
           limit,
           response.totalCount,
-          params.max_bytes ?? 200_000,
+          params.max_bytes ?? DEFAULT_MODEL_OUTPUT_BYTES,
         );
       }
       if (params.action === "commits") {
@@ -492,12 +490,12 @@ export function registerPullTool(pi: ExtensionAPI, runtimeProvider: RuntimeProvi
           page,
           limit,
           response.totalCount,
-          params.max_bytes ?? 200_000,
+          params.max_bytes ?? DEFAULT_MODEL_OUTPUT_BYTES,
         );
       }
       if (params.action === "diff") {
         const response = await client.request<string>(`${pullPath}.diff`, { ...requestOptions, accept: "text/plain" });
-        const maximum = params.max_bytes ?? 200_000;
+        const maximum = params.max_bytes ?? DEFAULT_LARGE_MODEL_OUTPUT_BYTES;
         const bounded = boundModelText(`Diff for ${reference}\n\n${response.data}`, maximum);
         return toolResult(bounded.text, {
           diff: bounded.text,
@@ -518,7 +516,7 @@ export function registerPullTool(pi: ExtensionAPI, runtimeProvider: RuntimeProvi
         if (actual.size !== ids.length || ids.some((id) => !actual.has(id))) {
           throw new Error(`Forgejo did not apply the requested labels to ${reference}`);
         }
-        await runtime.dashboard.refresh(signal);
+        await runtime.dashboard.refreshIfObserved(signal);
         return toolResult(`Set labels on ${reference}: ${params.labels.join(", ") || "none"}`, response.data);
       }
       if (params.action === "set_assignees") {
@@ -533,7 +531,7 @@ export function registerPullTool(pi: ExtensionAPI, runtimeProvider: RuntimeProvi
         if (actual.size !== assignees.length || assignees.some((name) => !actual.has(name.toLowerCase()))) {
           throw new Error(`Forgejo did not apply the requested assignees to ${reference}`);
         }
-        await runtime.dashboard.refresh(signal);
+        await runtime.dashboard.refreshIfObserved(signal);
         return toolResult(pullSummary("Updated assignees on", response.data, reference), response.data);
       }
       if (params.action === "set_milestone" || params.action === "clear_milestone") {
@@ -547,7 +545,7 @@ export function registerPullTool(pi: ExtensionAPI, runtimeProvider: RuntimeProvi
         });
         const actual = response.data.milestone?.id ?? 0;
         if (actual !== id) throw new Error(`Forgejo did not ${id === 0 ? "clear" : "set"} the requested milestone on ${reference}`);
-        await runtime.dashboard.refresh(signal);
+        await runtime.dashboard.refreshIfObserved(signal);
         return toolResult(`${id === 0 ? "Cleared milestone on" : `Set milestone '${response.data.milestone?.title ?? id}' on`} ${reference}`, response.data);
       }
       if (params.action === "set_due_date" || params.action === "clear_due_date") {
@@ -563,7 +561,7 @@ export function registerPullTool(pi: ExtensionAPI, runtimeProvider: RuntimeProvi
         if (dueDate === undefined ? Boolean(response.data.due_date) : Date.parse(response.data.due_date ?? "") !== Date.parse(dueDate)) {
           throw new Error(`Forgejo did not ${dueDate === undefined ? "clear" : "set"} the requested due date on ${reference}`);
         }
-        await runtime.dashboard.refresh(signal);
+        await runtime.dashboard.refreshIfObserved(signal);
         return toolResult(`${dueDate === undefined ? "Cleared due date on" : `Set due date ${dueDate} on`} ${reference}`, response.data);
       }
       if (params.action === "set_maintainer_edit") {
@@ -578,7 +576,7 @@ export function registerPullTool(pi: ExtensionAPI, runtimeProvider: RuntimeProvi
         if (response.data.allow_maintainer_edit !== params.allow_maintainer_edit) {
           throw new Error(`Forgejo did not update maintainer edit permission on ${reference}`);
         }
-        await runtime.dashboard.refresh(signal);
+        await runtime.dashboard.refreshIfObserved(signal);
         return toolResult(`${params.allow_maintainer_edit ? "Enabled" : "Disabled"} maintainer edits on ${reference}`, response.data);
       }
       if (params.action === "request_reviewers" || params.action === "remove_reviewers") {
@@ -611,7 +609,7 @@ export function registerPullTool(pi: ExtensionAPI, runtimeProvider: RuntimeProvi
         if (unverified.length > 0) {
           throw new Error(`Forgejo did not ${requesting ? "request" : "remove"} review for ${unverified.join(", ")} on ${reference}`);
         }
-        await runtime.dashboard.refresh(signal);
+        await runtime.dashboard.refreshIfObserved(signal);
         return toolResult(`${requesting ? "Requested" : "Removed"} review on ${reference}`, {
           pull: fresh.data,
           changedReviewers,
@@ -649,7 +647,7 @@ export function registerPullTool(pi: ExtensionAPI, runtimeProvider: RuntimeProvi
         if (verifiedDraft !== targetDraft) {
           throw new Error(`Forgejo did not mark ${reference} ${targetDraft ? "draft" : "ready"}`);
         }
-        await runtime.dashboard.refresh(signal);
+        await runtime.dashboard.refreshIfObserved(signal);
         return toolResult(pullSummary(targetDraft ? "Marked draft" : "Marked ready", response.data, reference), response.data);
       }
       if (params.action === "close" || params.action === "reopen") {
@@ -673,7 +671,7 @@ export function registerPullTool(pi: ExtensionAPI, runtimeProvider: RuntimeProvi
         if (response.data.state !== targetState) {
           throw new Error(`Forgejo returned state '${response.data.state}' after requesting '${targetState}' for ${reference}`);
         }
-        await runtime.dashboard.refresh(signal);
+        await runtime.dashboard.refreshIfObserved(signal);
         return toolResult(pullSummary(params.action === "close" ? "Closed" : "Reopened", response.data, reference), response.data);
       }
       if (params.action === "update") {
@@ -687,7 +685,7 @@ export function registerPullTool(pi: ExtensionAPI, runtimeProvider: RuntimeProvi
           method: "PATCH",
           body,
         });
-        await runtime.dashboard.refresh(signal);
+        await runtime.dashboard.refreshIfObserved(signal);
         return toolResult(pullSummary("Updated", response.data, reference), response.data);
       }
 
@@ -740,7 +738,7 @@ export function registerPullTool(pi: ExtensionAPI, runtimeProvider: RuntimeProvi
             delete_branch_after_merge: deleteBranch,
           },
         });
-        await runtime.dashboard.refresh(signal);
+        await runtime.dashboard.refreshIfObserved(signal);
         return toolResult(`Merged ${reference} with ${params.merge_method} at ${freshReadiness.headSha}`, {
           reference,
           method: params.merge_method,
@@ -752,7 +750,7 @@ export function registerPullTool(pi: ExtensionAPI, runtimeProvider: RuntimeProvi
         ...requestOptions,
         query: { page: params.page ?? 1, limit: positiveLimit(params.limit, 50) },
       });
-      const bounded = boundModelText(formatPull(pull.data, reference, reviews.data), params.max_bytes ?? 200_000);
+      const bounded = boundModelText(formatPull(pull.data, reference, reviews.data), params.max_bytes ?? DEFAULT_MODEL_OUTPUT_BYTES);
       return toolResult(bounded.text, {
         pull: pull.data,
         reviews: reviews.data,

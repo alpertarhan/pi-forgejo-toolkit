@@ -69,7 +69,7 @@ function fakeRuntime(
       get: () => capability,
       refresh: vi.fn(async () => ({ values: { work: capability }, errors: {} })),
     },
-    dashboard: { refresh: vi.fn(async () => undefined) },
+    dashboard: { refresh: vi.fn(async () => undefined), refreshIfObserved: vi.fn(async () => undefined) },
   } as unknown as ForgejoRuntime;
 }
 function confirmedContext(confirm = vi.fn(async (_title: string, _message: string) => true)): { ctx: ExtensionContext; confirm: typeof confirm } {
@@ -172,6 +172,28 @@ describe("forgejo_actions mutation safety", () => {
       ["repos/acme/app/actions/runs/91/cancel", "POST"],
       ["repos/acme/app/actions/runs/91", "GET"],
     ]);
+  });
+});
+
+describe("forgejo_actions output budgets", () => {
+  it("limits default job-log reads to 64 KB", async () => {
+    const request = vi.fn(async (path: string, options?: RequestOptions) => {
+      expect(path).toBe("repos/acme/app/actions/jobs/17/logs");
+      expect(options?.byteRange).toEqual({ start: 0, end: 63_999 });
+      return apiResult("bounded log", 206);
+    });
+    const tool = captureActionsTool(fakeRuntime(request));
+
+    const result = await tool.execute(
+      "log",
+      { action: "job_log", job_id: 17 },
+      signal,
+      undefined,
+      noUi,
+    );
+
+    expect(JSON.stringify(result)).toContain("[log truncated at 64000 bytes]");
+    expect(request).toHaveBeenCalledOnce();
   });
 });
 

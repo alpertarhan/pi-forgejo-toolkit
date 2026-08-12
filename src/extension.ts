@@ -7,7 +7,7 @@ import { createForgejoAutocompleteProvider } from "./dashboard/autocomplete.js";
 import { DashboardNotifier } from "./dashboard/notifier.js";
 import { DashboardOverlay } from "./dashboard/overlay.js";
 import { markNotificationRead } from "./dashboard/query.js";
-import { DashboardWidget } from "./dashboard/widget.js";
+import { DashboardWidget, renderDashboardStatus } from "./dashboard/widget.js";
 import { buildFgjConfig, discoverFgjInstances } from "./fgj.js";
 import { formatRepoRef, parseResourceRef, repoWebUrl, resourceWebUrl } from "./refs.js";
 import { createRuntime, type ForgejoRuntime } from "./runtime.js";
@@ -48,9 +48,13 @@ export default function forgejoExtension(pi: ExtensionAPI): void {
     throw new Error("Forgejo extension is still initializing");
   };
 
-  const cleanup = (): void => {
+  const stopRefreshTimer = (): void => {
     if (refreshTimer) clearInterval(refreshTimer);
     refreshTimer = undefined;
+  };
+
+  const cleanup = (): void => {
+    stopRefreshTimer();
     notifier?.close();
     notifier = undefined;
     statusUnsubscribe?.();
@@ -72,21 +76,47 @@ export default function forgejoExtension(pi: ExtensionAPI): void {
       widgets.add(widget);
       return widget;
     });
-    statusUnsubscribe = current.dashboard.subscribe(() => {
-      const snapshot = current.dashboard.snapshot();
-      const repo = snapshot.activeRepo ? formatRepoRef(snapshot.activeRepo) : "all";
-      const scopedServer = widgetScope === "current" && snapshot.activeRepo ? snapshot.servers[snapshot.activeRepo.server] : undefined;
-      const attention = scopedServer
-        ? scopedServer.reviewRequests.total + scopedServer.failedRuns.total + scopedServer.notifications.total
-        : snapshot.totals.reviewRequests + snapshot.totals.failedRuns + snapshot.totals.notifications;
-      ctx.ui.setStatus("forgejo", `fj ${repo} · ${attention} attention`);
-    });
+    const updateStatus = (): void => {
+      ctx.ui.setStatus(
+        "forgejo",
+        renderDashboardStatus(current.dashboard.snapshot(), current.config.dashboard.privacy, widgetScope),
+      );
+    };
+    statusUnsubscribe = current.dashboard.subscribe(updateStatus);
+    updateStatus();
     widgetVisible = true;
   };
 
-  const refresh = async (signal?: AbortSignal): Promise<void> => {
+  const refresh = async (signal?: AbortSignal) => {
     const current = requireRuntime();
-    await Promise.all([current.capabilities.refresh(signal), current.dashboard.refresh(signal)]);
+    const [, snapshot] = await Promise.all([current.capabilities.refresh(signal), current.dashboard.refresh(signal)]);
+    return snapshot;
+  };
+
+  const runInBackground = (ctx: ExtensionContext, operation: Promise<unknown>): void => {
+    void operation.catch((error: unknown) => {
+      if (ctx.hasUI) ctx.ui.notify(error instanceof Error ? error.message : String(error), "warning");
+    });
+  };
+
+  const syncDashboardActivity = (ctx: ExtensionContext, refreshNow: boolean): void => {
+    const current = runtime;
+    if (
+      !current ||
+      ctx.mode !== "tui" ||
+      (!widgetVisible && current.config.dashboard.notifications === "off")
+    ) {
+      stopRefreshTimer();
+      return;
+    }
+    if (!refreshTimer) {
+      refreshTimer = setInterval(() => {
+        const active = runtime;
+        if (active) runInBackground(ctx, active.dashboard.refresh());
+      }, current.config.dashboard.refreshSeconds * 1_000);
+      refreshTimer.unref();
+    }
+    if (refreshNow) runInBackground(ctx, refresh());
   };
 
 
@@ -128,7 +158,7 @@ export default function forgejoExtension(pi: ExtensionAPI): void {
       await ctx.reload();
     },
   });
-  registerForgejoTools(pi, requireRuntime);
+  const forgejoTools = registerForgejoTools(pi, requireRuntime);
 
   pi.registerCommand("fj-context", {
     description: "Show the active Forgejo server and repository",
@@ -151,8 +181,8 @@ export default function forgejoExtension(pi: ExtensionAPI): void {
       }
       if (!alias) return;
       const repo = current.selectServer(alias);
-      await current.dashboard.refresh();
       ctx.ui.notify(repo ? `Selected ${formatRepoRef(repo)}` : `Selected ${alias}; repository context remains explicit`, "info");
+      runInBackground(ctx, current.dashboard.refreshIfObserved());
     },
   });
 
@@ -171,8 +201,16 @@ export default function forgejoExtension(pi: ExtensionAPI): void {
   pi.registerCommand("fj-refresh", {
     description: "Refresh the Forgejo dashboard immediately",
     handler: async (_args, ctx) => {
-      await refresh();
-      ctx.ui.notify("Forgejo dashboard refreshed", "info");
+      const snapshot = await refresh();
+      const degraded = Object.values(snapshot.servers)
+        .filter((server) => server.health !== "ready")
+        .map((server) => `${server.alias} (${server.health})`);
+      ctx.ui.notify(
+        degraded.length > 0
+          ? `Forgejo refreshed with degraded servers: ${degraded.join(", ")}`
+          : `Forgejo refreshed: ${Object.keys(snapshot.servers).length} servers`,
+        degraded.length > 0 ? "warning" : "info",
+      );
     },
   });
 
@@ -190,12 +228,14 @@ export default function forgejoExtension(pi: ExtensionAPI): void {
         statusUnsubscribe = undefined;
         ctx.ui.setStatus("forgejo", undefined);
         widgetVisible = false;
+        syncDashboardActivity(ctx, false);
         ctx.ui.notify("Forgejo widget hidden", "info");
         return;
       }
       if (action !== "on" && action !== "all" && action !== "current") throw new Error("usage: /fj-widget [on|off|all|current]");
       if (action === "all" || action === "current") widgetScope = action;
       installWidget(ctx);
+      syncDashboardActivity(ctx, true);
       ctx.ui.notify(`Forgejo widget visible (${widgetScope})`, "info");
     },
   });
@@ -226,7 +266,7 @@ export default function forgejoExtension(pi: ExtensionAPI): void {
     handler: async (args, ctx) => {
       if (ctx.mode !== "tui") throw new Error("/fj dashboard requires TUI mode");
       const current = requireRuntime();
-      if (!current.dashboard.snapshot().fetchedAt) await current.dashboard.refresh();
+      runInBackground(ctx, current.dashboard.refresh());
       let overlay: DashboardOverlay | undefined;
       const selection = await ctx.ui.custom<string | null>(
         (tui, theme, _keybindings, done) => {
@@ -258,6 +298,7 @@ export default function forgejoExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("session_start", async (_event, ctx) => {
+    forgejoTools.reset();
     cleanup();
     startupError = undefined;
     try {
@@ -281,13 +322,7 @@ export default function forgejoExtension(pi: ExtensionAPI): void {
       if (runtime.config.dashboard.notifications !== "off") {
         notifier = new DashboardNotifier(runtime.dashboard, runtime.config.dashboard.notifications, (message, level) => ctx.ui.notify(message, level));
       }
-      void refresh().catch((error: unknown) => {
-        ctx.ui.notify(error instanceof Error ? error.message : String(error), "warning");
-      });
-      refreshTimer = setInterval(() => {
-        void runtime?.dashboard.refresh();
-      }, runtime.config.dashboard.refreshSeconds * 1_000);
-      refreshTimer.unref();
+      syncDashboardActivity(ctx, true);
     }
   });
 

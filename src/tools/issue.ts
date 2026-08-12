@@ -9,6 +9,8 @@ import {
   assertForgejoCommentTarget,
   authenticatedUserName,
   boundModelText,
+  DEFAULT_MODEL_OUTPUT_BYTES,
+  modelOutputBytes,
   confirmMutation,
   formatForgejoComment,
   positiveLimit,
@@ -65,12 +67,7 @@ export function registerIssueTool(pi: ExtensionAPI, runtimeProvider: RuntimeProv
   pi.registerTool({
     name: "forgejo_issue",
     label: "Forgejo Issue",
-    description: "List, read, create, edit, comment on, manage comments, subscriptions, labels, assignees, milestones, due dates, close, or reopen Forgejo issues, including paginated and incremental timelines.",
-    promptSnippet: "Read issue metadata, discussion, timeline, incremental updates, or subscription state and manage an explicitly resolved Forgejo issue, its comments, and planning metadata",
-    promptGuidelines: [
-      "Use forgejo_issue references with a server alias when no unambiguous local Forgejo repository is active.",
-      "Use forgejo_issue close only after the user explicitly requests closing the issue.",
-    ],
+    description: "Inspect and manage server-qualified Forgejo issues, discussions, subscriptions, planning metadata, and paginated or incremental timelines. Close only when explicitly requested.",
     parameters: Type.Object({
       action: StringEnum(["list", "get", "timeline", "updates", "create", "update", "comment", "get_comment", "edit_comment", "delete_comment", "subscription", "subscribe", "unsubscribe", "set_labels", "set_assignees", "set_milestone", "clear_milestone", "set_due_date", "clear_due_date", "close", "reopen"] as const),
       ...resourceTargetProperties,
@@ -89,7 +86,7 @@ export function registerIssueTool(pi: ExtensionAPI, runtimeProvider: RuntimeProv
       max_pages: Type.Optional(Type.Integer({ minimum: 1, maximum: 100, description: "Maximum timeline pages scanned by updates before withholding cursor advancement" })),
       since: Type.Optional(Type.String({ description: "RFC 3339 lower timestamp bound for timeline entries" })),
       before: Type.Optional(Type.String({ description: "RFC 3339 upper timestamp bound for timeline entries" })),
-      max_bytes: Type.Optional(Type.Integer({ minimum: 1000, maximum: 1000000 })),
+      max_bytes: modelOutputBytes(),
     }),
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       const runtime = runtimeProvider();
@@ -125,7 +122,7 @@ export function registerIssueTool(pi: ExtensionAPI, runtimeProvider: RuntimeProv
           body,
           ...(signal === undefined ? {} : { signal }),
         });
-        await runtime.dashboard.refresh(signal);
+        await runtime.dashboard.refreshIfObserved(signal);
         const ref = `${repo.server}:${repo.owner}/${repo.repo}#${response.data.number}`;
         return toolResult(issueSummary("Created", response.data, ref), response.data);
       }
@@ -140,7 +137,7 @@ export function registerIssueTool(pi: ExtensionAPI, runtimeProvider: RuntimeProv
           client.request<ForgejoIssue>(issuePath, requestOptions),
           client.request<ForgejoComment[]>(`${issuePath}/comments`, requestOptions),
         ]);
-        const bounded = boundModelText(formatIssue(issue.data, reference, comments.data), params.max_bytes ?? 200_000);
+        const bounded = boundModelText(formatIssue(issue.data, reference, comments.data), params.max_bytes ?? DEFAULT_MODEL_OUTPUT_BYTES);
         return toolResult(bounded.text, {
           issue: issue.data,
           comments: comments.data,
@@ -156,7 +153,7 @@ export function registerIssueTool(pi: ExtensionAPI, runtimeProvider: RuntimeProv
           query: { page, limit, since: params.since, before: params.before },
           ...(signal === undefined ? {} : { signal }),
         });
-        return timelineToolResult(reference, response.data, page, limit, response.totalCount, params.max_bytes ?? 200_000);
+        return timelineToolResult(reference, response.data, page, limit, response.totalCount, params.max_bytes ?? DEFAULT_MODEL_OUTPUT_BYTES);
       }
       if (params.action === "updates") {
         return incrementalConversationUpdates<ForgejoIssue>(runtime, ref, {
@@ -164,7 +161,7 @@ export function registerIssueTool(pi: ExtensionAPI, runtimeProvider: RuntimeProv
           timelinePath: `${issuePath}/timeline`,
           pageLimit: positiveLimit(params.limit, 50),
           maxPages: positiveLimit(params.max_pages, 20, 100),
-          maximumBytes: params.max_bytes ?? 200_000,
+          maximumBytes: params.max_bytes ?? DEFAULT_MODEL_OUTPUT_BYTES,
           ...(params.since === undefined ? {} : { since: params.since }),
           ...(signal === undefined ? {} : { signal }),
         });
@@ -176,7 +173,7 @@ export function registerIssueTool(pi: ExtensionAPI, runtimeProvider: RuntimeProv
           body: { body: params.body },
           ...(signal === undefined ? {} : { signal }),
         });
-        await runtime.dashboard.refresh(signal);
+        await runtime.dashboard.refreshIfObserved(signal);
         return toolResult(`Commented on ${reference}\n\n${formatForgejoComment(response.data)}`, response.data);
       }
       if (params.action === "get_comment" || params.action === "edit_comment" || params.action === "delete_comment") {
@@ -196,7 +193,7 @@ export function registerIssueTool(pi: ExtensionAPI, runtimeProvider: RuntimeProv
             body: { body: params.body },
             ...(signal === undefined ? {} : { signal }),
           });
-          await runtime.dashboard.refresh(signal);
+          await runtime.dashboard.refreshIfObserved(signal);
           return toolResult(`Edited comment ${params.comment_id} on ${reference}\n\n${formatForgejoComment(response.data)}`, response.data);
         }
         const preview = boundModelText(current.data.body || "(empty)", 2_000);
@@ -209,7 +206,7 @@ export function registerIssueTool(pi: ExtensionAPI, runtimeProvider: RuntimeProv
           method: "DELETE",
           ...(signal === undefined ? {} : { signal }),
         });
-        await runtime.dashboard.refresh(signal);
+        await runtime.dashboard.refreshIfObserved(signal);
         return toolResult(`Deleted comment ${params.comment_id} from ${reference}`, {
           reference,
           commentId: params.comment_id,
@@ -235,7 +232,7 @@ export function registerIssueTool(pi: ExtensionAPI, runtimeProvider: RuntimeProv
         if (response.data.subscribed !== expected) {
           throw new Error(`Forgejo did not ${expected ? "subscribe to" : "unsubscribe from"} ${reference}`);
         }
-        await runtime.dashboard.refresh(signal);
+        await runtime.dashboard.refreshIfObserved(signal);
         return toolResult(`${expected ? "Subscribed to" : "Unsubscribed from"} ${reference} as @${user}`, {
           user,
           ...response.data,
@@ -253,7 +250,7 @@ export function registerIssueTool(pi: ExtensionAPI, runtimeProvider: RuntimeProv
         if (actual.size !== ids.length || ids.some((id) => !actual.has(id))) {
           throw new Error(`Forgejo did not apply the requested labels to ${reference}`);
         }
-        await runtime.dashboard.refresh(signal);
+        await runtime.dashboard.refreshIfObserved(signal);
         return toolResult(`Set labels on ${reference}: ${params.labels.join(", ") || "none"}`, response.data);
       }
       if (params.action === "set_assignees") {
@@ -268,7 +265,7 @@ export function registerIssueTool(pi: ExtensionAPI, runtimeProvider: RuntimeProv
         if (actual.size !== assignees.length || assignees.some((name) => !actual.has(name.toLowerCase()))) {
           throw new Error(`Forgejo did not apply the requested assignees to ${reference}`);
         }
-        await runtime.dashboard.refresh(signal);
+        await runtime.dashboard.refreshIfObserved(signal);
         return toolResult(issueSummary("Updated assignees on", response.data, reference), response.data);
       }
       if (params.action === "set_milestone" || params.action === "clear_milestone") {
@@ -282,7 +279,7 @@ export function registerIssueTool(pi: ExtensionAPI, runtimeProvider: RuntimeProv
         });
         const actual = response.data.milestone?.id ?? 0;
         if (actual !== id) throw new Error(`Forgejo did not ${id === 0 ? "clear" : "set"} the requested milestone on ${reference}`);
-        await runtime.dashboard.refresh(signal);
+        await runtime.dashboard.refreshIfObserved(signal);
         return toolResult(`${id === 0 ? "Cleared milestone on" : `Set milestone '${response.data.milestone?.title ?? id}' on`} ${reference}`, response.data);
       }
       if (params.action === "set_due_date" || params.action === "clear_due_date") {
@@ -298,7 +295,7 @@ export function registerIssueTool(pi: ExtensionAPI, runtimeProvider: RuntimeProv
         if (dueDate === undefined ? Boolean(response.data.due_date) : Date.parse(response.data.due_date ?? "") !== Date.parse(dueDate)) {
           throw new Error(`Forgejo did not ${dueDate === undefined ? "clear" : "set"} the requested due date on ${reference}`);
         }
-        await runtime.dashboard.refresh(signal);
+        await runtime.dashboard.refreshIfObserved(signal);
         return toolResult(`${dueDate === undefined ? "Cleared due date on" : `Set due date ${dueDate} on`} ${reference}`, response.data);
       }
       if (params.action === "close") {
@@ -308,7 +305,7 @@ export function registerIssueTool(pi: ExtensionAPI, runtimeProvider: RuntimeProv
           body: { state: "closed" },
           ...(signal === undefined ? {} : { signal }),
         });
-        await runtime.dashboard.refresh(signal);
+        await runtime.dashboard.refreshIfObserved(signal);
         return toolResult(issueSummary("Closed", response.data, reference), response.data);
       }
       if (params.action === "reopen") {
@@ -317,7 +314,7 @@ export function registerIssueTool(pi: ExtensionAPI, runtimeProvider: RuntimeProv
           body: { state: "open" },
           ...(signal === undefined ? {} : { signal }),
         });
-        await runtime.dashboard.refresh(signal);
+        await runtime.dashboard.refreshIfObserved(signal);
         return toolResult(issueSummary("Reopened", response.data, reference), response.data);
       }
 
@@ -330,7 +327,7 @@ export function registerIssueTool(pi: ExtensionAPI, runtimeProvider: RuntimeProv
         body,
         ...(signal === undefined ? {} : { signal }),
       });
-      await runtime.dashboard.refresh(signal);
+      await runtime.dashboard.refreshIfObserved(signal);
       return toolResult(issueSummary("Updated", response.data, reference), response.data);
     },
   });

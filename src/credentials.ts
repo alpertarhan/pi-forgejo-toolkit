@@ -25,7 +25,10 @@ export class EnvironmentCredentialProvider implements CredentialProvider {
 
   async getToken(): Promise<string> {
     const token = this.environment[this.variable];
-    if (!token) throw new CredentialError(`Forgejo ${this.server} token environment variable ${this.variable} is not set`);
+    if (!token) throw new CredentialError(`Forgejo ${this.server} API token environment variable ${this.variable} is not set`);
+    if (/\s/.test(token)) {
+      throw new CredentialError(`Forgejo ${this.server} API token environment variable ${this.variable} is invalid`);
+    }
     return token;
   }
 

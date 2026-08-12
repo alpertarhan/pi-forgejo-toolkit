@@ -24,6 +24,8 @@ import type {
 } from "../types.js";
 import {
   confirmMutation,
+  DEFAULT_LARGE_MODEL_OUTPUT_BYTES,
+  modelOutputBytes,
   positiveLimit,
   repoTargetProperties,
   toolResult,
@@ -178,12 +180,6 @@ export function registerActionsTool(pi: ExtensionAPI, runtimeProvider: RuntimePr
     name: "forgejo_actions",
     label: "Forgejo Actions",
     description: "Inspect Forgejo Actions runs, jobs, logs, and artifacts; safely dispatch workflows, cancel or rerun supported runs, and download bounded artifact archives.",
-    promptSnippet: "Inspect or safely operate Forgejo Actions workflow runs, jobs, logs, and artifacts",
-    promptGuidelines: [
-      "Workflow dispatch, run cancellation, and rerun require capability checks and interactive confirmation.",
-      "Never put secret values in tool output; dispatch input values are shown only in the interactive confirmation.",
-      "Artifact downloads stay inside the current workspace and never overwrite a file unless overwrite is explicitly true.",
-    ],
     parameters: Type.Object({
       action: StringEnum(["list", "get", "jobs", "job_log", "dispatch", "cancel", "rerun", "artifacts", "artifact", "download_artifact"] as const),
       ...repoTargetProperties,
@@ -202,7 +198,7 @@ export function registerActionsTool(pi: ExtensionAPI, runtimeProvider: RuntimePr
       overwrite: Type.Optional(Type.Boolean({ description: "Allow replacing an existing artifact output file" })),
       page: Type.Optional(Type.Integer({ minimum: 1 })),
       limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 50 })),
-      max_bytes: Type.Optional(Type.Integer({ minimum: 1_000, maximum: 1_000_000 })),
+      max_bytes: modelOutputBytes("Maximum model-visible job-log bytes; default 64 KB"),
       max_download_bytes: Type.Optional(Type.Integer({ minimum: 1_000, maximum: 1_000_000_000, description: "Maximum artifact metadata size and downloaded ZIP bytes" })),
     }),
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
@@ -229,7 +225,7 @@ export function registerActionsTool(pi: ExtensionAPI, runtimeProvider: RuntimePr
           ].join("\n"),
         );
         const run = await dispatchActionWorkflow(client, repo, workflow, ref, inputs, signal);
-        await runtime.dashboard.refresh(signal);
+        await runtime.dashboard.refreshIfObserved(signal);
         const summary = run
           ? `Dispatched ${workflow} on ${repo.server}:${repo.owner}/${repo.repo}@${ref} as run ${run.run_number} (id ${run.id})`
           : `Dispatched ${workflow} on ${repo.server}:${repo.owner}/${repo.repo}@${ref}`;
@@ -262,7 +258,7 @@ export function registerActionsTool(pi: ExtensionAPI, runtimeProvider: RuntimePr
         if (params.action === "cancel") await cancelActionRun(client, repo, runId, signal);
         else await rerunActionRun(client, repo, runId, signal);
         const fresh = await getActionRun(client, repo, runId, signal);
-        await runtime.dashboard.refresh(signal);
+        await runtime.dashboard.refreshIfObserved(signal);
         return toolResult(
           `${params.action === "cancel" ? "Cancellation" : "Rerun"} requested for Actions run ${fresh.index_in_repo} (id ${runId}) [${fresh.status}]`,
           fresh,
@@ -339,7 +335,7 @@ export function registerActionsTool(pi: ExtensionAPI, runtimeProvider: RuntimePr
 
       if (params.action === "job_log") {
         const jobId = requireId(params.job_id, "job_id");
-        const maximum = params.max_bytes ?? 200_000;
+        const maximum = params.max_bytes ?? DEFAULT_LARGE_MODEL_OUTPUT_BYTES;
         const result = await getActionJobLog(client, repo, jobId, params.attempt, maximum, signal);
         const suffix = result.truncated ? `\n\n[log truncated at ${maximum} bytes]` : "";
         return toolResult(`Job ${jobId} log${result.truncated ? " (truncated)" : ""}\n\n${result.log}${suffix}`, {

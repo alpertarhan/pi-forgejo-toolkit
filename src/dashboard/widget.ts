@@ -59,6 +59,18 @@ function snapshotForScope(snapshot: DashboardSnapshot, scope: DashboardScope): D
   };
 }
 
+export function renderDashboardStatus(
+  snapshot: DashboardSnapshot,
+  privacy: PrivacyMode,
+  scope: DashboardScope = "all",
+): string {
+  const view = snapshotForScope(snapshot, scope);
+  const context = privacy === "counts-only" ? "all" : view.activeRepo ? formatRepoRef(view.activeRepo) : "all";
+  const attention = view.totals.reviewRequests + view.totals.failedRuns + view.totals.notifications;
+  const state = view.refreshing || !view.fetchedAt ? "syncing" : `${attention} attention`;
+  return `fj ${context} · ${state}`;
+}
+
 export function renderWidgetLines(
   snapshot: DashboardSnapshot,
   width: number,

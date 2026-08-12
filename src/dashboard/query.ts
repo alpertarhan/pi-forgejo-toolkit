@@ -128,6 +128,16 @@ function collection<T>(data: T[], totalCount: number | undefined, mapper: (value
   };
 }
 
+function openIssueCollection(
+  data: ForgejoIssue[],
+  totalCount: number | undefined,
+  mapper: (value: ForgejoIssue) => DashboardItem | undefined,
+): DashboardCollection {
+  const open = data.filter((issue) => issue.state.toLowerCase() === "open");
+  return collection(open, open.length === data.length ? totalCount : undefined, mapper);
+}
+
+
 export async function queryServerDashboard(
   client: ForgejoClient,
   previewLimit: number,
@@ -166,9 +176,9 @@ export async function queryServerDashboard(
     health: "ready",
     fetchedAt: new Date().toISOString(),
     identity: currentUser,
-    assignedIssues: collection(assigned.data, assigned.totalCount, (issue) => issueItem(issue, client.alias, "assigned")),
-    authoredPulls: collection(authored.data, authored.totalCount, (issue) => issueItem(issue, client.alias, "authored-pull")),
-    reviewRequests: collection(reviews.data, reviews.totalCount, (issue) => issueItem(issue, client.alias, "review")),
+    assignedIssues: openIssueCollection(assigned.data, assigned.totalCount, (issue) => issueItem(issue, client.alias, "assigned")),
+    authoredPulls: openIssueCollection(authored.data, authored.totalCount, (issue) => issueItem(issue, client.alias, "authored-pull")),
+    reviewRequests: openIssueCollection(reviews.data, reviews.totalCount, (issue) => issueItem(issue, client.alias, "review")),
     notifications: collection(notifications.data, notifications.totalCount, (notification) =>
       notificationItem(notification, client.alias, client.config.baseUrl),
     ),

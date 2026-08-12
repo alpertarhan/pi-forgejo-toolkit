@@ -1,7 +1,15 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
-import { boundModelText, positiveLimit, toolResult, type RuntimeProvider } from "./common.js";
+import { boundModelText, DEFAULT_MODEL_OUTPUT_BYTES, modelOutputBytes, positiveLimit, toolResult, type RuntimeProvider } from "./common.js";
+
+const SEARCH_PREVIEW_BYTES = 240;
+
+function searchPreview(value: string): { text: string; truncated: boolean } {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  const bounded = boundModelText(normalized, SEARCH_PREVIEW_BYTES, "…");
+  return { text: bounded.text, truncated: bounded.truncated };
+}
 
 function record(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : undefined;
@@ -29,7 +37,10 @@ function formatSearchItem(server: string, action: "issues" | "pulls" | "reposito
       `Updated: ${stringField(item, "updated_at") ?? "unknown"}`,
     ];
     const body = stringField(item, "body");
-    if (body) lines.push("Body:", body);
+    if (body) {
+      const preview = searchPreview(body);
+      if (preview.text) lines.push(`Body preview${preview.truncated ? " (truncated)" : ""}: ${preview.text}`);
+    }
     const webUrl = stringField(item, "html_url");
     if (webUrl) lines.push(`URL: ${webUrl}`);
     return lines.join("\n");
@@ -38,7 +49,10 @@ function formatSearchItem(server: string, action: "issues" | "pulls" | "reposito
     const fullName = stringField(item, "full_name") ?? stringField(item, "name") ?? "unknown";
     const lines = [`${server}:${fullName}`];
     const description = stringField(item, "description");
-    if (description) lines.push(description);
+    if (description) {
+      const preview = searchPreview(description);
+      if (preview.text) lines.push(`Description${preview.truncated ? " (truncated)" : ""}: ${preview.text}`);
+    }
     const webUrl = stringField(item, "html_url");
     if (webUrl) lines.push(`URL: ${webUrl}`);
     return lines.join("\n");
@@ -57,8 +71,7 @@ export function registerSearchTool(pi: ExtensionAPI, runtimeProvider: RuntimePro
   pi.registerTool({
     name: "forgejo_search",
     label: "Forgejo Search",
-    description: "Search issues, pull requests, repositories, or users across configured Forgejo servers. Every result retains its server identity.",
-    promptSnippet: "Search Forgejo resources across one or every configured server",
+    description: "Search server-qualified issues, pull requests, repositories, or users across Forgejo servers.",
     parameters: Type.Object({
       action: StringEnum(["issues", "pulls", "repositories", "users"] as const),
       query: Type.String({ minLength: 1 }),
@@ -66,7 +79,7 @@ export function registerSearchTool(pi: ExtensionAPI, runtimeProvider: RuntimePro
       state: Type.Optional(StringEnum(["open", "closed", "all"] as const)),
       page: Type.Optional(Type.Integer({ minimum: 1 })),
       limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })),
-      max_bytes: Type.Optional(Type.Integer({ minimum: 1000, maximum: 1000000 })),
+      max_bytes: modelOutputBytes(),
     }),
     async execute(_toolCallId, params, signal) {
       const runtime = runtimeProvider();
@@ -102,7 +115,7 @@ export function registerSearchTool(pi: ExtensionAPI, runtimeProvider: RuntimePro
       for (const alias of Object.keys(errors)) summaryParts.push(`${alias}: error`);
       const entries = results.flatMap((result) => result.items.map((item) => formatSearchItem(result.server, params.action, item)));
       const text = [`${params.action} search '${params.query}' | ${summaryParts.join(" | ")}`, ...entries].join("\n\n");
-      const bounded = boundModelText(text, params.max_bytes ?? 200_000);
+      const bounded = boundModelText(text, params.max_bytes ?? DEFAULT_MODEL_OUTPUT_BYTES);
       return toolResult(bounded.text, {
         results,
         errors,

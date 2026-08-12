@@ -68,7 +68,7 @@ const signal = new AbortController().signal;
 const noUi = { hasUI: false } as ExtensionContext;
 const repo = { server: "work", owner: "acme", repo: "app" } as const;
 
-function issueRuntime() {
+function issueRuntime(body = "The complete issue body is visible.") {
   const ref: ResourceRef = { ...repo, kind: "issue", index: 12 };
   const request = vi.fn(async (path: string, options?: RequestOptions) => {
     if (path.endsWith("/issues/12/comments")) {
@@ -109,7 +109,7 @@ function issueRuntime() {
         id: 12,
         number: 12,
         title: "Timeout under load",
-        body: "The complete issue body is visible.",
+        body,
         state: "open",
         html_url: "https://work.example/acme/app/issues/12",
         created_at: "2026-08-12T10:00:00Z",
@@ -125,7 +125,7 @@ function issueRuntime() {
     resolveRepo: () => repo,
     resolveResource: () => ref,
     client: () => ({ request } as unknown as ForgejoClient),
-    dashboard: { refresh: vi.fn(async () => undefined) },
+    dashboard: { refresh: vi.fn(async () => undefined), refreshIfObserved: vi.fn(async () => undefined) },
   } as unknown as ForgejoRuntime;
   return { runtime, request };
 }
@@ -142,6 +142,19 @@ describe("issue conversation output", () => {
     expect(text).toContain("Production log shows the timeout.");
     const commentCall = fixture.request.mock.calls.find((call) => call[0].endsWith("/issues/12/comments"));
     expect(commentCall?.[1]?.query).toBeUndefined();
+  });
+
+  it("bounds issue snapshots to 32 KB by default", async () => {
+    const fixture = issueRuntime("x".repeat(40_000));
+    const tool = captureTool(registerIssueTool, fixture.runtime);
+    const result = requireToolOutput(
+      await tool.execute("get", { action: "get", ref: "work:acme/app#12" }, signal, undefined, noUi),
+    );
+    const text = outputText(result);
+
+    expect(Buffer.byteLength(text, "utf8")).toBeLessThanOrEqual(32_000);
+    expect(text).toContain("[output truncated at 32000 bytes]");
+    expect(result.details.data).toMatchObject({ truncated: true, renderedBytes: 32_000 });
   });
 
   it("uses timeline pagination and timestamp bounds without hiding event bodies", async () => {
@@ -265,7 +278,7 @@ function pullRuntime() {
     resolveRepo: () => repo,
     resolveResource: () => ref,
     client: () => ({ request } as unknown as ForgejoClient),
-    dashboard: { refresh },
+    dashboard: { refresh, refreshIfObserved: refresh },
   } as unknown as ForgejoRuntime;
   return { runtime, request, refresh };
 }
@@ -371,7 +384,7 @@ describe("remote review output", () => {
       client: () => ({ request } as unknown as ForgejoClient),
       draftKey: () => "work:acme/app!9",
       drafts: new Map(),
-      dashboard: { refresh: vi.fn(async () => undefined) },
+      dashboard: { refresh: vi.fn(async () => undefined), refreshIfObserved: vi.fn(async () => undefined) },
     } as unknown as ForgejoRuntime;
     const tool = captureTool(registerReviewTool, runtime);
 
@@ -418,7 +431,7 @@ describe("notification output", () => {
       client: () => ({ request } as unknown as ForgejoClient),
       clients: { aliases: () => ["work"] },
       currentServer: () => "work",
-      dashboard: { refresh: vi.fn(async () => undefined) },
+      dashboard: { refresh: vi.fn(async () => undefined), refreshIfObserved: vi.fn(async () => undefined) },
     } as unknown as ForgejoRuntime;
     const tool = captureTool(registerNotificationTool, runtime);
     const result = await tool.execute(

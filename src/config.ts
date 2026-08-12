@@ -102,7 +102,7 @@ function parseServer(alias: string, value: unknown): ForgejoServerConfig {
   }
   const raw = value as RawServerConfig;
   if (raw.token !== undefined) {
-    throw new ConfigError(`servers.${alias}.token is forbidden; use an environment variable or fgj credential provider`);
+    throw new ConfigError(`servers.${alias}.token is forbidden; use tokenEnv with credentialProvider 'env' or use fgj`);
   }
   const provider =
     raw.credentialProvider === undefined
@@ -131,6 +131,9 @@ function parseServer(alias: string, value: unknown): ForgejoServerConfig {
       throw new ConfigError(`servers.${alias}.tokenEnv is not a valid environment variable name`);
     }
     server.tokenEnv = tokenEnv;
+    if (raw.fgjConfig !== undefined) {
+      throw new ConfigError(`servers.${alias}.fgjConfig cannot be used with credentialProvider 'env'`);
+    }
   } else {
     if (raw.tokenEnv !== undefined) {
       throw new ConfigError(`servers.${alias}.tokenEnv cannot be used with credentialProvider 'fgj'`);

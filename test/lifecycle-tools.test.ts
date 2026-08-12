@@ -3,9 +3,12 @@ import { describe, expect, it, vi } from "vitest";
 import type { ForgejoClient, RequestOptions } from "../src/client.js";
 import type { ConversationCursor, ForgejoRuntime } from "../src/runtime.js";
 import { incrementalConversationUpdates } from "../src/tools/conversation.js";
+import { toolResult } from "../src/tools/common.js";
 import { registerIssueTool } from "../src/tools/issue.js";
 import { registerNotificationTool } from "../src/tools/notifications.js";
 import { registerPullTool } from "../src/tools/pull.js";
+import { registerForgejoTools } from "../src/tools/index.js";
+import { registerSearchTool } from "../src/tools/search.js";
 import type { ApiResult, ResourceRef } from "../src/types.js";
 
 interface CapturedTool {
@@ -16,6 +19,15 @@ interface CapturedTool {
     onUpdate: undefined,
     ctx: ExtensionContext,
   ): Promise<unknown>;
+}
+
+interface RegisteredTool extends CapturedTool {
+  name: string;
+  promptSnippet?: string;
+  promptGuidelines?: string[];
+  parameters: {
+    properties?: Record<string, { maximum?: number; maxItems?: number; items?: { enum?: unknown[] } }>;
+  };
 }
 
 interface ToolOutput {
@@ -84,7 +96,7 @@ function resourceRuntime(
     capabilities: {
       get: () => ({ user: { id: 1, login: "alice" } }),
     },
-    dashboard: { refresh: vi.fn(async () => undefined) },
+    dashboard: { refresh: vi.fn(async () => undefined), refreshIfObserved: vi.fn(async () => undefined) },
   } as unknown as ForgejoRuntime;
 }
 
@@ -420,5 +432,178 @@ describe("issue and pull metadata mutations", () => {
       tool.execute("close", { action: "close", ref: "work:acme/app!9" }, signal, undefined, noUi),
     ).rejects.toThrow("requires interactive confirmation");
     expect(request).toHaveBeenCalledOnce();
+  });
+});
+
+describe("cross-server search previews", () => {
+  it("renders bounded single-line body previews instead of full issue bodies", async () => {
+    const body = "diagnostic line\n".repeat(500);
+    const request = vi.fn(async () =>
+      apiResult(
+        [
+          {
+            number: 12,
+            title: "Timeout",
+            state: "open",
+            body,
+            updated_at: "2026-08-12T10:00:00Z",
+            html_url: "https://work.example/acme/app/issues/12",
+            user: { login: "alice" },
+            repository: { full_name: "acme/app" },
+          },
+        ],
+        1,
+      ),
+    );
+    const runtime = {
+      client: () => ({ request } as unknown as ForgejoClient),
+    } as unknown as ForgejoRuntime;
+    const tool = captureTool(registerSearchTool, runtime);
+
+    const text = outputText(
+      await tool.execute(
+        "search",
+        { action: "issues", query: "timeout", server: "work", limit: 1 },
+        signal,
+        undefined,
+        noUi,
+      ),
+    );
+
+    expect(text).toContain("Body preview (truncated):");
+    expect(text).toContain("work:acme/app#12");
+    expect(text).not.toContain(body);
+    expect(Buffer.byteLength(text, "utf8")).toBeLessThan(1_000);
+  });
+});
+
+describe("tool result persistence", () => {
+  it("compacts oversized hidden details while preserving small recovery metadata", () => {
+    const result = toolResult("bounded output", {
+      reference: "work:acme/app#12",
+      page: 2,
+      body: "x".repeat(20_000),
+      recovery: { nextPage: 3 },
+    });
+    const data = result.details.data as Record<string, unknown>;
+
+    expect(result.content[0]?.text).toBe("bounded output");
+    expect(data).toMatchObject({
+      reference: "work:acme/app#12",
+      page: 2,
+      recovery: { nextPage: 3 },
+      detailsTruncated: true,
+    });
+    expect(data.body).toBeUndefined();
+    expect(data.detailsOriginalBytes).toBeGreaterThan(20_000);
+    expect(Buffer.byteLength(JSON.stringify(data), "utf8")).toBeLessThan(2_000);
+  });
+});
+
+describe("Forgejo tool activation", () => {
+  it("starts with only context and loader tools, then adds requested domains", async () => {
+    const tools = new Map<string, RegisteredTool>();
+    let active = ["read"];
+    const api = {
+      registerTool(definition: RegisteredTool) {
+        tools.set(definition.name, definition);
+        active.push(definition.name);
+      },
+      getActiveTools() {
+        return [...active];
+      },
+      setActiveTools(names: string[]) {
+        active = [...names];
+      },
+    } as unknown as ExtensionAPI;
+    const controller = registerForgejoTools(api, () => {
+      throw new Error("runtime must not be created while loading tools");
+    });
+
+    controller.reset();
+    expect(active).toEqual(["read", "forgejo_context", "forgejo_tools"]);
+
+    const loader = tools.get("forgejo_tools");
+    if (!loader) throw new Error("Forgejo tool loader was not registered");
+    await loader.execute(
+      "load",
+      { domains: ["review", "actions"] },
+      signal,
+      undefined,
+      noUi,
+    );
+    expect(active).toEqual([
+      "read",
+      "forgejo_context",
+      "forgejo_tools",
+      "forgejo_pull",
+      "forgejo_review",
+      "forgejo_actions",
+    ]);
+
+    controller.reset();
+    expect(active).toEqual(["read", "forgejo_context", "forgejo_tools"]);
+  });
+
+  it("rejects all-at-once and oversized domain activation", async () => {
+    const tools = new Map<string, RegisteredTool>();
+    let active = ["read", "forgejo_context", "forgejo_tools"];
+    const api = {
+      registerTool(definition: RegisteredTool) {
+        tools.set(definition.name, definition);
+      },
+      getActiveTools: () => [...active],
+      setActiveTools(names: string[]) {
+        active = [...names];
+      },
+    } as unknown as ExtensionAPI;
+    registerForgejoTools(api, () => {
+      throw new Error("runtime must not be created while loading tools");
+    });
+    const loader = tools.get("forgejo_tools");
+    if (!loader) throw new Error("Forgejo tool loader was not registered");
+
+    expect(loader.parameters.properties?.domains?.items?.enum).not.toContain("all");
+    expect(loader.parameters.properties?.domains?.maxItems).toBe(4);
+    await expect(
+      loader.execute(
+        "load-too-many",
+        { domains: ["issue", "pull", "review", "actions", "search"] },
+        signal,
+        undefined,
+        noUi,
+      ),
+    ).rejects.toThrow("at most 4 domains");
+    expect(active).toEqual(["read", "forgejo_context", "forgejo_tools"]);
+  });
+
+  it("keeps lazy tools out of the system prompt and caps their model-visible output", () => {
+    const tools = new Map<string, RegisteredTool>();
+    const api = {
+      registerTool(definition: RegisteredTool) {
+        tools.set(definition.name, definition);
+      },
+    } as unknown as ExtensionAPI;
+    registerForgejoTools(api, () => {
+      throw new Error("runtime must not be created while registering tools");
+    });
+
+    const lazyNames = [
+      "forgejo_actions",
+      "forgejo_dashboard",
+      "forgejo_issue",
+      "forgejo_pull",
+      "forgejo_review",
+      "forgejo_notifications",
+      "forgejo_search",
+    ];
+    for (const name of lazyNames) {
+      const tool = tools.get(name);
+      expect(tool?.promptSnippet, name).toBeUndefined();
+      expect(tool?.promptGuidelines, name).toBeUndefined();
+    }
+    for (const name of lazyNames.filter((name) => name !== "forgejo_dashboard")) {
+      expect(tools.get(name)?.parameters.properties?.max_bytes?.maximum, name).toBe(128_000);
+    }
   });
 });
