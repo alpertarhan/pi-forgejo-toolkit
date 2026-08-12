@@ -37,6 +37,20 @@ function sameRepo(item: DashboardItem, repo: RepoRef | undefined): boolean {
   return Boolean(repo && item.server === repo.server && item.owner === repo.owner && item.repo === repo.repo);
 }
 
+function sameRepoRef(left: RepoRef | undefined, right: RepoRef | undefined): boolean {
+  return (
+    left?.server === right?.server &&
+    left?.owner === right?.owner &&
+    left?.repo === right?.repo
+  );
+}
+
+function clearFailedRuns(server: ServerDashboard): ServerDashboard {
+  const { actionsError: _removed, ...current } = server;
+  return { ...current, failedRuns: { ...EMPTY_COLLECTION } };
+}
+
+
 function attentionItems(servers: Record<string, ServerDashboard>, activeRepo: RepoRef | undefined): DashboardItem[] {
   const unique = new Map<string, DashboardItem>();
   for (const server of Object.values(servers)) {
@@ -110,7 +124,18 @@ export class DashboardStore {
     };
   }
 
+  private clearActiveRepoData(repo: RepoRef | undefined): void {
+    if (sameRepoRef(this.snapshotValue.activeRepo, repo)) return;
+    this.snapshotValue = {
+      ...this.snapshotValue,
+      servers: Object.fromEntries(
+        Object.entries(this.snapshotValue.servers).map(([alias, server]) => [alias, clearFailedRuns(server)]),
+      ),
+    };
+  }
+
   setActiveRepo(repo: RepoRef | undefined): void {
+    this.clearActiveRepoData(repo);
     if (repo) this.snapshotValue = { ...this.snapshotValue, activeRepo: repo };
     else {
       const { activeRepo: _removed, ...snapshot } = this.snapshotValue;
@@ -175,18 +200,15 @@ export class DashboardStore {
           this.recalculate();
         } catch (error) {
           if (generation !== this.generation || controller.signal.aborted) return;
-          const previous = this.snapshotValue.servers[alias] ?? initialServer(alias);
-          const health = previous.fetchedAt
-            ? "stale"
-            : (error instanceof ForgejoError && error.code === "auth") || error instanceof CredentialError
+          const health =
+            (error instanceof ForgejoError && error.code === "auth") || error instanceof CredentialError
               ? "auth-error"
               : "error";
           const failed: ServerDashboard = {
-            ...previous,
+            ...initialServer(alias),
             health,
             error: error instanceof Error ? error.message : String(error),
           };
-          if (previous.fetchedAt) failed.staleSince = new Date().toISOString();
           this.snapshotValue = {
             ...this.snapshotValue,
             servers: { ...this.snapshotValue.servers, [alias]: failed },

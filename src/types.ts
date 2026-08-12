@@ -424,7 +424,7 @@ export interface ApiResult<T> {
   totalCount?: number;
 }
 
-export type ServerHealth = "loading" | "ready" | "stale" | "auth-error" | "error";
+export type ServerHealth = "loading" | "ready" | "auth-error" | "error";
 export type DashboardItemKind = "assigned" | "authored-pull" | "review" | "notification" | "ci-failed";
 
 export interface DashboardItem {
@@ -451,7 +451,6 @@ export interface ServerDashboard {
   alias: ServerAlias;
   health: ServerHealth;
   fetchedAt?: string;
-  staleSince?: string;
   error?: string;
   identity?: ForgejoUser;
   assignedIssues: DashboardCollection;

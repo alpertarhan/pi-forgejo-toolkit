@@ -175,7 +175,7 @@ const theme = {
 } as unknown as Theme;
 
 describe("DashboardStore", () => {
-  it("keeps successful server data when another server fails", async () => {
+  it("isolates server failures and clears every stale item from the failed server", async () => {
     const state = { review: true, failWork: false };
     const store = new DashboardStore(clients(dashboardFetch(state), true), 3, {
       server: "work",
@@ -191,8 +191,27 @@ describe("DashboardStore", () => {
 
     state.failWork = true;
     await store.refresh();
-    expect(store.snapshot().servers.work?.health).toBe("stale");
-    expect(store.snapshot().totals.assignedIssues).toBe(4);
+    expect(store.snapshot().servers.work?.health).toBe("error");
+    expect(store.snapshot().totals).toEqual({ assignedIssues: 0, authoredPulls: 0, reviewRequests: 0, notifications: 0, failedRuns: 0 });
+    expect(store.snapshot().attention).toEqual([]);
+    store.close();
+  });
+
+  it("clears repository-scoped CI runs immediately when repository context changes", async () => {
+    const state = { review: false, failWork: false };
+    const store = new DashboardStore(clients(dashboardFetch(state), false), 3, {
+      server: "work",
+      owner: "acme",
+      repo: "app",
+    });
+    await store.refresh();
+    expect(store.snapshot().totals.failedRuns).toBe(1);
+
+    store.setActiveRepo({ server: "work", owner: "acme", repo: "next" });
+    expect(store.snapshot().servers.work?.failedRuns).toEqual({ total: 0, items: [] });
+    expect(store.snapshot().totals.failedRuns).toBe(0);
+    expect(store.snapshot().totals.authoredPulls).toBe(2);
+    expect(store.snapshot().attention.some((item) => item.kind === "ci-failed")).toBe(false);
     store.close();
   });
 

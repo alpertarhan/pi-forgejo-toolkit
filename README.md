@@ -46,7 +46,7 @@ Alternative package sources:
 pi install git:github.com/alpertarhan/pi-forgejo-toolkit
 
 # Pin an exact npm version
-pi install npm:pi-forgejo-toolkit@0.2.0
+pi install npm:pi-forgejo-toolkit@0.2.1
 ```
 
 Update an unpinned install with:
@@ -255,7 +255,7 @@ The dashboard aggregates, per server:
 - Unread notification threads
 - Latest failed Forgejo Actions runs for the active repository
 
-One server failing does not erase healthy servers' data. Stale data and per-server errors remain visible. Notification popups can be disabled or limited to important items.
+One server failing does not erase healthy servers' data. A failed server's cached issues, pull requests, notifications, and CI runs are cleared immediately rather than displayed as stale; its error remains visible. Notification popups can be disabled or limited to important items.
 
 Background polling runs only while the widget is visible or notification popups are enabled. With both disabled, Forgejo mutations do not trigger an otherwise unused dashboard fetch; `/fj-refresh`, `/fj`, and explicit dashboard tool reads still fetch on demand. Hiding the widget clears its status line immediately. The status line reports `syncing` during refresh and then the current attention count; `counts-only` privacy also hides the active repository there.
 

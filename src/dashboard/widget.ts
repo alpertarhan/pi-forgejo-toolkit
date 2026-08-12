@@ -31,8 +31,8 @@ function healthLabel(snapshot: DashboardSnapshot, theme: Theme): string | undefi
   const labels = Object.values(snapshot.servers)
     .filter((server) => server.health !== "ready" && server.health !== "loading")
     .map((server) => {
-      const state = server.health === "auth-error" ? "auth error" : server.health === "stale" ? `stale ${formatRelativeAge(server.staleSince)}` : "error";
-      return theme.fg(server.health === "stale" ? "warning" : "error", `${server.alias}: ${state}`);
+      const state = server.health === "auth-error" ? "auth error" : "error";
+      return theme.fg("error", `${server.alias}: ${state}`);
     });
   for (const server of Object.values(snapshot.servers)) {
     if (server.actionsError) labels.push(theme.fg("warning", `${server.alias}: CI unavailable`));
