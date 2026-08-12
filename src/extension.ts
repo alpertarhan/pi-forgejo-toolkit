@@ -1,14 +1,11 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { AutocompleteProvider } from "@earendil-works/pi-tui";
-import { configPaths, parseConfig } from "./config.js";
+import { runForgejoSetup, type SetupStage } from "./setup.js";
 import { createForgejoAutocompleteProvider } from "./dashboard/autocomplete.js";
 import { DashboardNotifier } from "./dashboard/notifier.js";
 import { DashboardOverlay } from "./dashboard/overlay.js";
 import { markNotificationRead } from "./dashboard/query.js";
 import { DashboardWidget, renderDashboardStatus } from "./dashboard/widget.js";
-import { buildFgjConfig, discoverFgjInstances } from "./fgj.js";
 import { formatRepoRef, parseResourceRef, repoWebUrl, resourceWebUrl } from "./refs.js";
 import { createRuntime, type ForgejoRuntime } from "./runtime.js";
 import { registerForgejoTools } from "./tools/index.js";
@@ -21,16 +18,6 @@ async function openExternal(pi: ExtensionAPI, url: string): Promise<void> {
   if (result.code !== 0) throw new Error(result.stderr.trim() || `failed to open ${url}`);
 }
 
-async function readConfigObject(path: string): Promise<Record<string, unknown>> {
-  try {
-    const value = JSON.parse(await readFile(path, "utf8")) as unknown;
-    if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error(`${path} must contain a JSON object`);
-    return value as Record<string, unknown>;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return {};
-    throw error;
-  }
-}
 
 export default function forgejoExtension(pi: ExtensionAPI): void {
   let runtime: ForgejoRuntime | undefined;
@@ -121,41 +108,44 @@ export default function forgejoExtension(pi: ExtensionAPI): void {
 
 
   pi.registerCommand("fj-setup", {
-    description: "Create global or project Forgejo config from authenticated fgj instances",
+    description: "Run the guided Forgejo server, credential, and dashboard setup",
     handler: async (args, ctx) => {
       if (!ctx.hasUI) throw new Error("/fj-setup requires an interactive UI");
-      const scope = args.trim().toLowerCase() || "global";
-      if (scope !== "global" && scope !== "project") throw new Error("usage: /fj-setup [global|project]");
-      const instances = await discoverFgjInstances(
-        async (command, commandArgs, options) => pi.exec(command, commandArgs, options),
-        ctx.cwd,
-      );
-      const generated = buildFgjConfig(instances);
-      const paths = configPaths(ctx.cwd);
-      const target = scope === "project" ? paths.project : paths.global;
-      const existing = await readConfigObject(target);
-      const existingServers =
-        typeof existing.servers === "object" && existing.servers !== null && !Array.isArray(existing.servers)
-          ? (existing.servers as Record<string, unknown>)
-          : {};
-      const proposal = {
-        ...existing,
-        servers: { ...existingServers, ...generated.servers },
-        dashboard: existing.dashboard ?? generated.dashboard,
+      const labels: Record<SetupStage, string> = {
+        scope: "Scope",
+        servers: "Servers",
+        dashboard: "Dashboard",
+        review: "Review",
       };
-      const edited = await ctx.ui.editor(`Forgejo config: ${target}`, JSON.stringify(proposal, null, 2));
-      if (edited === undefined) return;
-      const parsed = JSON.parse(edited) as unknown;
-      const validated = parseConfig(parsed);
-      const accepted = await ctx.ui.confirm(
-        "Write Forgejo config",
-        `Path: ${target}\nInstances: ${Object.keys(validated.servers).join(", ")}\nCredentials: fgj auth store`,
-      );
-      if (!accepted) return;
-      await mkdir(dirname(target), { recursive: true });
-      await writeFile(target, `${JSON.stringify(validated, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
-      ctx.ui.notify(`Forgejo config written: ${target}`, "info");
-      await ctx.reload();
+      const updateProgress = (stage: SetupStage, step: number, total: number): void => {
+        ctx.ui.setStatus("forgejo-setup", `setup ${step}/${total} · ${labels[stage]}`);
+        if (ctx.mode === "tui") {
+          const stages: SetupStage[] = ["scope", "servers", "dashboard", "review"];
+          ctx.ui.setWidget("forgejo-setup", [
+            `Forgejo Setup  ${step}/${total}`,
+            stages.map((value, index) => `${value === stage ? "[" : " "}${index + 1} ${labels[value]}${value === stage ? "]" : " "}`).join("  "),
+            "Native guided setup; Esc cancels safely. API token values are never written.",
+          ]);
+        }
+      };
+      try {
+        const result = await runForgejoSetup({
+          args,
+          cwd: ctx.cwd,
+          ui: ctx.ui,
+          exec: async (command, commandArgs, options) => pi.exec(command, commandArgs, options),
+          onStage: updateProgress,
+        });
+        if (!result) {
+          ctx.ui.notify("Forgejo setup cancelled; no configuration was changed.", "info");
+          return;
+        }
+        ctx.ui.notify(`Forgejo config written: ${result.target}`, "info");
+        await ctx.reload();
+      } finally {
+        ctx.ui.setStatus("forgejo-setup", undefined);
+        if (ctx.mode === "tui") ctx.ui.setWidget("forgejo-setup", undefined);
+      }
     },
   });
   const forgejoTools = registerForgejoTools(pi, requireRuntime);

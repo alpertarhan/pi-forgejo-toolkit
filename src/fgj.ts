@@ -36,7 +36,7 @@ export async function discoverFgjInstances(
   return instances;
 }
 
-function baseAlias(hostname: string): string {
+export function suggestServerAlias(hostname: string): string {
   const host = hostname.split(":")[0] ?? hostname;
   const labels = host.split(".").filter(Boolean);
   if (labels.length > 2 && ["git", "code", "forgejo"].includes(labels[0] ?? "")) labels.shift();
@@ -48,7 +48,7 @@ export function buildFgjConfig(instances: FgjInstance[]): ForgejoConfig {
   const used = new Set<string>();
   const servers: Record<string, unknown> = {};
   for (const instance of instances) {
-    const base = baseAlias(instance.hostname);
+    const base = suggestServerAlias(instance.hostname);
     let alias = base;
     let suffix = 2;
     while (used.has(alias)) {

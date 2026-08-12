@@ -37,7 +37,7 @@ Restart Pi or run `/reload`, then create a configuration:
 /fj-setup
 ```
 
-`/fj-setup` discovers instances already authenticated in [`fgj`](https://codeberg.org/forgejo-contrib/forgejo-cli), lets you review the generated JSON, and asks before writing it. It is optional: API-token users can create the configuration below and never install or invoke `fgj`.
+`/fj-setup` opens a native, guided TUI. It asks where to save the configuration, walks through every server and credential provider, configures dashboard preferences, then shows a final summary before writing. No JSON editing is required.
 
 Alternative package sources:
 
@@ -46,7 +46,7 @@ Alternative package sources:
 pi install git:github.com/alpertarhan/pi-forgejo-toolkit
 
 # Pin an exact npm version
-pi install npm:pi-forgejo-toolkit@0.2.2
+pi install npm:pi-forgejo-toolkit@0.3.0
 ```
 
 Update an unpinned install with:
@@ -77,12 +77,13 @@ This intentionally avoids pinning the extension to one Pi release. Normal Pi upd
 
 ## Quick start
 
-1. Authenticate each Forgejo instance with `fgj`, or export token variables.
-2. Install the package with `pi install npm:pi-forgejo-toolkit`.
-3. Run `/fj-setup global` for `fgj`-backed configuration, or create the JSON manually.
-4. Open a repository whose Git remote points at a configured server.
-5. Run `/fj-context` and `/fj-health`.
-6. Open `/fj` for the interactive attention dashboard.
+1. Install the package with `pi install npm:pi-forgejo-toolkit`.
+2. Restart Pi or run `/reload`.
+3. Run `/fj-setup` and choose global or project scope.
+4. Add each server from an authenticated `fgj` profile or by naming an API-token environment variable.
+5. Choose a dashboard profile, review the summary, and save.
+6. Open a repository whose Git remote points at a configured server.
+7. Run `/fj-context` and `/fj-health`, then open `/fj`.
 
 Example prompts:
 
@@ -95,6 +96,19 @@ Review community:tools/runner!45. Build the review draft, but do not submit it.
 
 List the latest failed Actions runs for work:platform/api and inspect the failed job log.
 ```
+
+## Guided setup
+
+Run `/fj-setup` without arguments for the full four-step flow:
+
+1. **Scope** — choose global configuration for every project or project-local configuration for the current workspace. `/fj-setup global` and `/fj-setup project` skip this question.
+2. **Servers** — discover signed-in `fgj` instances or add API-token servers without a CLI. Add, reconfigure, or remove multiple servers; choose short aliases and optional SSH host aliases used by Git remotes.
+3. **Dashboard** — select Recommended, Quiet, Private, or On-demand behavior, or choose every widget, scope, notification, privacy, refresh, and preview setting.
+4. **Review** — inspect the destination, server URLs, credential sources, token-variable availability, remote aliases, and dashboard behavior before saving.
+
+The wizard can update an existing configuration or explicitly replace it. Esc cancels without writing. API token **values** are never requested or stored; the wizard writes only environment variable names. Configuration is validated, written atomically with owner-only permissions, and rejected if another process changes the file while the wizard is open.
+
+The JSON examples below remain useful as an advanced reference, but normal installation and reconfiguration do not require editing them.
 
 ## Configuration
 
@@ -216,7 +230,7 @@ The remote resolver understands HTTPS, `ssh://`, SCP-style SSH URLs, ports, `.gi
 
 | Command | Purpose |
 | --- | --- |
-| `/fj-setup [global\|project]` | Discover authenticated `fgj` instances, review config, and write it after confirmation. |
+| `/fj-setup [global\|project]` | Guided TUI for scope, `fgj` or API-token servers, Git aliases, dashboard preferences, review, and safe writing. |
 | `/fj-context` | Show the active server and repository. |
 | `/fj-server [alias]` | Select a server for the current session. |
 | `/fj-health` | Authenticate and report every configured server's Forgejo version. |
