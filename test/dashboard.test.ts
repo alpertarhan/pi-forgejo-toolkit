@@ -215,7 +215,7 @@ describe("DashboardStore", () => {
     store.close();
   });
 
-  it("excludes closed issues and pulls when a server ignores the open-state filter", async () => {
+  it("excludes closed results and labels authored pull totals as open", async () => {
     const state = { review: true, failWork: false, includeClosed: true };
     const store = new DashboardStore(clients(dashboardFetch(state), false), 3);
     await store.refresh();
@@ -225,6 +225,7 @@ describe("DashboardStore", () => {
     expect(server?.authoredPulls).toMatchObject({ total: 1, items: [{ index: 20 }] });
     expect(server?.reviewRequests).toMatchObject({ total: 1, items: [{ index: 30 }] });
     expect(store.snapshot().attention.map((item) => item.index)).not.toEqual(expect.arrayContaining([11, 21, 31]));
+    expect(renderWidgetLines(store.snapshot(), 100, theme, "full")[1]).toContain("My Open PRs 1");
     store.close();
   });
 
@@ -300,7 +301,7 @@ describe("DashboardStore", () => {
     expect(compact).toHaveLength(1);
     expect(compact[0]).toContain("I:4 P:2 R:1 N:7 C:1");
     expect(wide).toHaveLength(3);
-    expect(wide[1]).toBe("Issues 4 | My PRs 2 | Reviews 1 | Inbox 7 | CI failed 1");
+    expect(wide[1]).toBe("Issues 4 | My Open PRs 2 | Reviews 1 | Inbox 7 | CI failed 1");
     expect(wide[2]).toContain("Next: review work:acme/app!30");
     store.close();
   });

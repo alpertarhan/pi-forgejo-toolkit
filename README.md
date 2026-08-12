@@ -46,7 +46,7 @@ Alternative package sources:
 pi install git:github.com/alpertarhan/pi-forgejo-toolkit
 
 # Pin an exact npm version
-pi install npm:pi-forgejo-toolkit@0.2.1
+pi install npm:pi-forgejo-toolkit@0.2.2
 ```
 
 Update an unpinned install with:
@@ -254,6 +254,8 @@ The dashboard aggregates, per server:
 - Pull requests awaiting your review
 - Unread notification threads
 - Latest failed Forgejo Actions runs for the active repository
+
+`My Open PRs` is the complete count of authored pull requests that Forgejo currently reports as open in the selected dashboard scope; it is not a lifetime total. Item lists remain bounded by `previewLimit`.
 
 One server failing does not erase healthy servers' data. A failed server's cached issues, pull requests, notifications, and CI runs are cleared immediately rather than displayed as stale; its error remains visible. Notification popups can be disabled or limited to important items.
 

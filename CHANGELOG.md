@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-08-12
+
+### Changed
+
+- Dashboard labels now identify authored pull-request totals explicitly as open counts.
+
 ## [0.2.1] - 2026-08-12
 
 ### Fixed
@@ -37,7 +43,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `forgejo-issue-to-pr` and `forgejo-pr-review` workflow skills.
 - Environment-variable and `fgj` credential providers with redirect and secret-redaction protections.
 
-[Unreleased]: https://github.com/alpertarhan/pi-forgejo-toolkit/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/alpertarhan/pi-forgejo-toolkit/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/alpertarhan/pi-forgejo-toolkit/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/alpertarhan/pi-forgejo-toolkit/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/alpertarhan/pi-forgejo-toolkit/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/alpertarhan/pi-forgejo-toolkit/releases/tag/v0.1.0

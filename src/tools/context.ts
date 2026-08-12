@@ -132,7 +132,7 @@ export function registerContextTools(pi: ExtensionAPI, runtimeProvider: RuntimeP
       const limit = positiveLimit(params.limit);
       if (params.action === "get" || params.action === "refresh") {
         return toolResult(
-          `Issues ${snapshot.totals.assignedIssues} | My PRs ${snapshot.totals.authoredPulls} | Reviews ${snapshot.totals.reviewRequests} | CI failed ${snapshot.totals.failedRuns} | Inbox ${snapshot.totals.notifications}`,
+          `Issues ${snapshot.totals.assignedIssues} | My Open PRs ${snapshot.totals.authoredPulls} | Reviews ${snapshot.totals.reviewRequests} | CI failed ${snapshot.totals.failedRuns} | Inbox ${snapshot.totals.notifications}`,
           snapshot,
         );
       }
@@ -154,7 +154,7 @@ export function registerContextTools(pi: ExtensionAPI, runtimeProvider: RuntimeP
         collectionKey === "assignedIssues"
           ? "Assigned issues"
           : collectionKey === "authoredPulls"
-            ? "My pull requests"
+            ? "My open pull requests"
             : collectionKey === "failedRuns"
               ? "Failed CI runs"
               : "Review requests";

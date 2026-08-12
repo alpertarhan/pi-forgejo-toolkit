@@ -83,7 +83,7 @@ export function renderWidgetLines(
   const active = view.activeRepo ? formatRepoRef(view.activeRepo) : `${Object.keys(view.servers).length} servers`;
   const sync = view.refreshing ? "syncing" : `synced ${formatRelativeAge(view.fetchedAt)} ago`;
   const issues = `Issues ${totals.assignedIssues}`;
-  const pulls = `My PRs ${totals.authoredPulls}`;
+  const pulls = `My Open PRs ${totals.authoredPulls}`;
   const reviews = totals.reviewRequests > 0 ? theme.fg("warning", `Reviews ${totals.reviewRequests}`) : "Reviews 0";
   const inbox = totals.notifications > 0 ? theme.fg("warning", `Inbox ${totals.notifications}`) : "Inbox 0";
   const ci = totals.failedRuns > 0 ? theme.fg("error", `CI failed ${totals.failedRuns}`) : "CI failed 0";

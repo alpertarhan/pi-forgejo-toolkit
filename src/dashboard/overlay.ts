@@ -155,7 +155,7 @@ export class DashboardOverlay implements Component {
       truncateToWidth(
         this.theme.fg(
           "muted",
-          `${totals.reviewRequests} reviews | ${totals.assignedIssues} issues | ${totals.authoredPulls} PRs | ${totals.failedRuns} CI failed | ${totals.notifications} unread`,
+          `${totals.reviewRequests} reviews | ${totals.assignedIssues} issues | ${totals.authoredPulls} open PRs | ${totals.failedRuns} CI failed | ${totals.notifications} unread`,
         ),
         width,
       ),
