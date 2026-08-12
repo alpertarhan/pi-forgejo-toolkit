@@ -1,0 +1,12 @@
+node_modules/
+coverage/
+.DS_Store
+*.log
+.env
+.env.*
+!.env.example
+*.tgz
+.npmrc
+.pi/forgejo.json
+.pi/npm/
+.pi/git/

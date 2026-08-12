@@ -1,0 +1,72 @@
+name: Bug report
+description: Report a reproducible defect in pi-forgejo-toolkit
+title: "bug: "
+labels: [bug, triage]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Remove tokens, private repository names, internal hostnames, issue bodies, and workflow inputs before submitting.
+  - type: input
+    id: toolkit-version
+    attributes:
+      label: Toolkit version
+      placeholder: 0.1.0
+    validations:
+      required: true
+  - type: input
+    id: pi-version
+    attributes:
+      label: Pi version
+      placeholder: Output of pi --version
+    validations:
+      required: true
+  - type: input
+    id: forgejo-version
+    attributes:
+      label: Forgejo version
+      placeholder: 16.0.2
+    validations:
+      required: true
+  - type: dropdown
+    id: credential-provider
+    attributes:
+      label: Credential provider
+      options:
+        - fgj
+        - environment variable
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Provide the smallest deterministic sequence that triggers the problem.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Redacted logs or tool output
+      render: text
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Safety check
+      options:
+        - label: I removed all credentials and private infrastructure details.
+          required: true
+        - label: This is not a vulnerability report. I will use the private security advisory form for security issues.
+          required: true

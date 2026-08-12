@@ -1,0 +1,210 @@
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { describe, expect, it, vi } from "vitest";
+import type { ForgejoClient } from "../src/client.js";
+import type { ForgejoRuntime } from "../src/runtime.js";
+import { registerPullTool } from "../src/tools/pull.js";
+import type { ForgejoPullReview, ResourceRef } from "../src/types.js";
+
+interface CapturedTool {
+  execute(
+    toolCallId: string,
+    params: Record<string, unknown>,
+    signal: AbortSignal,
+    onUpdate: undefined,
+    ctx: ExtensionContext,
+  ): Promise<unknown>;
+}
+
+interface FixtureOptions {
+  heads?: string[];
+  checkState?: "pending" | "success" | "error" | "failure" | "warning" | "skipped";
+  requiredApprovals?: number;
+  reviews?: ForgejoPullReview[];
+  requestedReviewers?: Array<{ id: number; login: string }>;
+}
+
+function capturePullTool(runtime: ForgejoRuntime): CapturedTool {
+  let captured: CapturedTool | undefined;
+  const api = {
+    registerTool(definition: CapturedTool) {
+      captured = definition;
+    },
+  } as unknown as ExtensionAPI;
+  registerPullTool(api, () => runtime);
+  if (!captured) throw new Error("pull tool was not registered");
+  return captured;
+}
+
+function fakeRuntime(options: FixtureOptions = {}) {
+  const ref: ResourceRef = { server: "work", owner: "acme", repo: "app", kind: "pull", index: 9 };
+  const heads = [...(options.heads ?? ["head-sha", "head-sha"])];
+  const checkState = options.checkState ?? "success";
+  const request = vi.fn(async (path: string, requestOptions?: { method?: string; body?: unknown }) => {
+    if (requestOptions?.method === "POST" && path.endsWith("/pulls/9/merge")) {
+      return { data: undefined, status: 200, headers: new Headers() };
+    }
+    if (path.endsWith("/pulls/9")) {
+      const head = heads.shift() ?? "head-sha";
+      return {
+        data: {
+          id: 9,
+          number: 9,
+          title: "Safe change",
+          state: "open",
+          html_url: "https://work.example/acme/app/pulls/9",
+          updated_at: "2026-08-12T10:00:00Z",
+          draft: false,
+          mergeable: true,
+          merged: false,
+          requested_reviewers: options.requestedReviewers ?? [],
+          requested_reviewers_teams: [],
+          head: { ref: "feature", sha: head },
+          base: { ref: "main", sha: "base-sha" },
+        },
+        status: 200,
+        headers: new Headers(),
+      };
+    }
+    if (path.endsWith("/branches/main")) {
+      return {
+        data: {
+          name: "main",
+          protected: (options.requiredApprovals ?? 0) > 0,
+          enable_status_check: true,
+          required_approvals: options.requiredApprovals ?? 0,
+          status_check_contexts: ["ci"],
+          user_can_merge: true,
+        },
+        status: 200,
+        headers: new Headers(),
+      };
+    }
+    if (path.includes("/commits/") && path.endsWith("/status")) {
+      return {
+        data: {
+          state: checkState,
+          sha: path.split("/").at(-2),
+          total_count: 1,
+          statuses: [{ id: 1, context: "ci", status: checkState }],
+        },
+        status: 200,
+        headers: new Headers(),
+      };
+    }
+    if (path.endsWith("/pulls/9/reviews")) {
+      return { data: options.reviews ?? [], status: 200, headers: new Headers() };
+    }
+    throw new Error(`unexpected request: ${path}`);
+  });
+  const refresh = vi.fn(async () => undefined);
+  const runtime = {
+    resolveRepo: () => ({ server: "work", owner: "acme", repo: "app" }),
+    resolveResource: () => ref,
+    client: () => ({ request } as unknown as ForgejoClient),
+    dashboard: { refresh },
+  } as unknown as ForgejoRuntime;
+  return { runtime, request, refresh };
+}
+
+const signal = new AbortController().signal;
+const noUi = { hasUI: false } as ExtensionContext;
+
+describe("forgejo_pull guarded merge", () => {
+  it("reports failed checks, requested changes, missing approvals, and pending reviewers", async () => {
+    const fixture = fakeRuntime({
+      checkState: "failure",
+      requiredApprovals: 1,
+      requestedReviewers: [{ id: 3, login: "alice" }],
+      reviews: [
+        {
+          id: 7,
+          user: { id: 4, login: "bob" },
+          state: "REQUEST_CHANGES",
+          official: true,
+          commit_id: "head-sha",
+        },
+      ],
+    });
+    const tool = capturePullTool(fixture.runtime);
+
+    const result = (await tool.execute(
+      "readiness",
+      { action: "readiness", ref: "work:acme/app!9" },
+      signal,
+      undefined,
+      noUi,
+    )) as { details: { data: { ready: boolean; blockers: string[] } } };
+
+    expect(result.details.data.ready).toBe(false);
+    expect(result.details.data.blockers).toEqual(
+      expect.arrayContaining([
+        "combined commit status is failure",
+        "required check 'ci' is failure",
+        "changes requested by bob",
+        "requires 1 approvals; found 0",
+        "review still requested from alice",
+      ]),
+    );
+  });
+
+  it("blocks failed checks before asking for confirmation", async () => {
+    const fixture = fakeRuntime({ checkState: "failure" });
+    const tool = capturePullTool(fixture.runtime);
+    const confirm = vi.fn(async () => true);
+    const ui = { hasUI: true, ui: { confirm } } as unknown as ExtensionContext;
+
+    await expect(
+      tool.execute("merge", { action: "merge", ref: "work:acme/app!9", merge_method: "squash" }, signal, undefined, ui),
+    ).rejects.toThrow("combined commit status is failure");
+    expect(confirm).not.toHaveBeenCalled();
+    expect(fixture.request.mock.calls.some((call) => call[1]?.method === "POST")).toBe(false);
+  });
+
+  it("requires interactive confirmation before merge", async () => {
+    const fixture = fakeRuntime();
+    const tool = capturePullTool(fixture.runtime);
+
+    await expect(
+      tool.execute("merge", { action: "merge", ref: "work:acme/app!9", merge_method: "squash" }, signal, undefined, noUi),
+    ).rejects.toThrow("requires interactive confirmation");
+    expect(fixture.request.mock.calls.some((call) => call[1]?.method === "POST")).toBe(false);
+  });
+
+  it("rejects a changed head after confirmation", async () => {
+    const fixture = fakeRuntime({ heads: ["old-sha", "new-sha"] });
+    const tool = capturePullTool(fixture.runtime);
+    const confirm = vi.fn(async () => true);
+    const ui = { hasUI: true, ui: { confirm } } as unknown as ExtensionContext;
+
+    await expect(
+      tool.execute("merge", { action: "merge", ref: "work:acme/app!9", merge_method: "merge" }, signal, undefined, ui),
+    ).rejects.toThrow("pull request head changed from old-sha to new-sha");
+    expect(confirm).toHaveBeenCalledOnce();
+    expect(fixture.request.mock.calls.some((call) => call[1]?.method === "POST")).toBe(false);
+  });
+
+  it("posts the guarded strategy and expected head only after rechecking readiness", async () => {
+    const fixture = fakeRuntime();
+    const tool = capturePullTool(fixture.runtime);
+    const confirm = vi.fn(async () => true);
+    const ui = { hasUI: true, ui: { confirm } } as unknown as ExtensionContext;
+
+    await tool.execute(
+      "merge",
+      { action: "merge", ref: "work:acme/app!9", merge_method: "rebase", delete_branch: true },
+      signal,
+      undefined,
+      ui,
+    );
+
+    const post = fixture.request.mock.calls.find((call) => call[1]?.method === "POST");
+    expect(confirm).toHaveBeenCalledOnce();
+    expect(post?.[0]).toBe("repos/acme/app/pulls/9/merge");
+    expect(post?.[1]?.body).toEqual({
+      Do: "rebase",
+      head_commit_id: "head-sha",
+      delete_branch_after_merge: true,
+    });
+    expect(fixture.refresh).toHaveBeenCalledOnce();
+  });
+});

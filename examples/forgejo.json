@@ -1,0 +1,26 @@
+{
+  "servers": {
+    "work": {
+      "hostname": "git.work.example",
+      "credentialProvider": "fgj",
+      "remoteHosts": [
+        "forgejo-work"
+      ]
+    },
+    "community": {
+      "hostname": "code.community.example",
+      "credentialProvider": "fgj",
+      "remoteHosts": [
+        "forgejo-community"
+      ]
+    }
+  },
+  "dashboard": {
+    "enabled": true,
+    "scope": "all",
+    "refreshSeconds": 90,
+    "previewLimit": 3,
+    "notifications": "important",
+    "privacy": "full"
+  }
+}

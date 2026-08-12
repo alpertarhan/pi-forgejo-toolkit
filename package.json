@@ -1,0 +1,77 @@
+{
+  "name": "pi-forgejo-toolkit",
+  "version": "0.1.0",
+  "description": "Multi-server Forgejo workflows, dashboard, reviews, and Actions tools for Pi",
+  "type": "module",
+  "author": {
+    "name": "Alper Tarhan",
+    "url": "https://github.com/alpertarhan"
+  },
+  "homepage": "https://github.com/alpertarhan/pi-forgejo-toolkit#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/alpertarhan/pi-forgejo-toolkit.git"
+  },
+  "bugs": {
+    "url": "https://github.com/alpertarhan/pi-forgejo-toolkit/issues"
+  },
+  "keywords": [
+    "pi-package",
+    "pi",
+    "pi-extension",
+    "forgejo",
+    "gitea",
+    "coding-agent",
+    "developer-tools",
+    "multi-server"
+  ],
+  "license": "MIT",
+  "files": [
+    "extensions",
+    "examples",
+    "skills",
+    "src",
+    ".env.example",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "check": "bun run typecheck && bun run test",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepack": "bun run check"
+  },
+  "pi": {
+    "extensions": [
+      "./extensions"
+    ],
+    "skills": [
+      "./skills"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
+    "typebox": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-ai": "0.84.1",
+    "@earendil-works/pi-coding-agent": "0.84.1",
+    "@earendil-works/pi-tui": "0.84.1",
+    "@types/node": "^24.0.0",
+    "typebox": "1.3.12",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.10"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "packageManager": "bun@1.3.14",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}
