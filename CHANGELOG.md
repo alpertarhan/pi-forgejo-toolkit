@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- Added the lazy `forgejo_watch` domain for session-scoped one-shot issue and pull-request timeline watches, with start/list/stop controls and metadata-only Pi wake messages.
+
+### Changed
+
+- The dashboard widget, popup notifier, and automatic polling now start only when local Git remotes match a configured Forgejo server; explicit dashboard commands remain available elsewhere.
+- Incremental timeline scans now tolerate Forgejo pagination limits and local/server clock skew, cancel failed polls cleanly, deduplicate transition events, and bound watch-list model output.
+
+### Security
+
+- Watch notifications exclude remote bodies, titles, diffs, and raw errors; session shutdown closes active watches before runtime teardown.
+
 ## [0.3.0] - 2026-08-12
 
 ### Added

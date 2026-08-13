@@ -21,6 +21,7 @@ It also gives Pi a single, safety-oriented interface for:
 - Forgejo Actions runs, jobs, bounded logs, dispatches, cancellation, reruns, and artifacts
 - A compact TUI attention queue across all configured servers
 - Session-scoped incremental timeline updates that avoid rereading an entire discussion
+- Session-scoped one-shot issue and pull-request watches that wake Pi on matching timeline metadata
 - Cross-server search that never drops the source server identity
 
 ## Installation
@@ -196,7 +197,7 @@ Use a separate, least-privilege Forgejo API token for every server. The environm
 
 | Field | Default | Values |
 | --- | --- | --- |
-| `enabled` | `true` | Show the compact TUI widget at startup. |
+| `enabled` | `true` | Automatically show the compact TUI widget when the current Git remotes match a configured Forgejo server. |
 | `scope` | `all` | `all` or `current`. |
 | `refreshSeconds` | `90` | Integer from 30 to 3600. |
 | `previewLimit` | `3` | Integer from 1 to 20. |
@@ -241,9 +242,9 @@ The remote resolver understands HTTPS, `ssh://`, SCP-style SSH URLs, ports, `.gi
 
 ## Pi tools
 
-The package registers nine model-callable tools. Users normally describe the desired operation instead of constructing JSON manually.
+The package registers ten model-callable tools. Users normally describe the desired operation instead of constructing JSON manually.
 
-By default, only `forgejo_context` and the compact `forgejo_tools` loader are active. The loader activates at most four requested issue, pull, review, Actions, notification, search, or dashboard domains per call, additively for the current session; a new session returns to the compact set. There is deliberately no "load everything" option. The bundled skills request only their required domains. This keeps seven larger schemas out of Pi's initial context and avoids rebuilding the system prompt when a domain is activated, without delaying slash commands or the TUI dashboard.
+By default, only `forgejo_context` and the compact `forgejo_tools` loader are active. The loader activates at most four requested issue, pull, review, Actions, notification, search, dashboard, or watch domains per call, additively for the current session; a new session returns to the compact set. There is deliberately no "load everything" option. The bundled skills request only their required domains. This keeps eight larger schemas out of Pi's initial context and avoids rebuilding the system prompt when a domain is activated, without delaying slash commands or the TUI dashboard.
 
 | Tool | Actions |
 | --- | --- |
@@ -256,6 +257,9 @@ By default, only `forgejo_context` and the compact `forgejo_tools` loader are ac
 | `forgejo_pull` | `list`, `get`, `timeline`, `updates`, `comment`, `get_comment`, `edit_comment`, `delete_comment`, `subscription`, `subscribe`, `unsubscribe`, `files`, `diff`, `commits`, `checks`, `create`, `update`, `set_labels`, `set_assignees`, `set_milestone`, `clear_milestone`, `set_due_date`, `clear_due_date`, `set_maintainer_edit`, `close`, `reopen`, `mark_draft`, `mark_ready`, `request_reviewers`, `remove_reviewers`, `readiness`, `merge` |
 | `forgejo_review` | `list`, `get`, `get_comments`, `create_draft`, `add_inline_comment`, `preview`, `submit`, `discard` |
 | `forgejo_actions` | `list`, `get`, `jobs`, `job_log`, `dispatch`, `cancel`, `rerun`, `artifacts`, `artifact`, `download_artifact` |
+| `forgejo_watch` | `start`, `list`, `stop` for one-shot issue/PR timeline watches |
+
+`forgejo_watch` starts only after its `watch` domain is loaded. Watches are in-memory and scoped to the current Pi session: unloading the lazy tool does not stop active watches, while session shutdown, replacement, reload, or a new session closes them. A match, timeout, or permanent failure completes a watch once. `attention=turn` steers or starts an agent turn; `attention=context` adds context without starting one. `include_self=false` filters timeline events by actor and merge transitions by `merged_by`; Forgejo's issue/PR state response does not identify who closed or reopened a resource, so those two transition filters cannot distinguish self-authored changes. Wake messages contain only bounded toolkit-generated metadata and an exact `forgejo_issue`/`forgejo_pull action=updates` follow-up hint; remote titles, bodies, diffs, and raw errors are excluded. Timeline cursor state stores fixed-size event fingerprints rather than remote bodies or titles.
 
 Model-visible metadata and discussion output defaults to 32 KB. Pull-request diffs and Actions job logs default to 64 KB. `max_bytes` can lower either budget but is hard-capped at 128 KB; truncated timeline results retain pagination and recovery metadata. Cross-server search includes a bounded, single-line body preview; use the qualified result with `forgejo_issue` or `forgejo_pull` when the complete body is needed. Oversized hidden tool details are compacted before Pi persists them, retaining small identifiers and recovery fields rather than duplicating full remote payloads in session history. Artifact downloads use the separate `max_download_bytes` limit and write ZIP bytes to a deliberate workspace path instead of returning the archive to the model.
 
@@ -273,7 +277,7 @@ The dashboard aggregates, per server:
 
 One server failing does not erase healthy servers' data. A failed server's cached issues, pull requests, notifications, and CI runs are cleared immediately rather than displayed as stale; its error remains visible. Notification popups can be disabled or limited to important items.
 
-Background polling runs only while the widget is visible or notification popups are enabled. With both disabled, Forgejo mutations do not trigger an otherwise unused dashboard fetch; `/fj-refresh`, `/fj`, and explicit dashboard tool reads still fetch on demand. Hiding the widget clears its status line immediately. The status line reports `syncing` during refresh and then the current attention count; `counts-only` privacy also hides the active repository there.
+The widget, popup notifier, and automatic dashboard polling start only when local Git remotes identify a configured Forgejo repository. A repository with multiple matching Forgejo remotes remains eligible, but the ambiguous repository context must still be selected explicitly before current-repository operations. In unrelated directories they stay inactive even when `dashboard.enabled` is `true`; `/fj-widget on`, `/fj`, `/fj-refresh`, and explicit dashboard tool reads remain available on demand. Background polling otherwise runs only while the widget is visible or popup notifications are active. Hiding the widget clears its status line immediately. The status line reports `syncing` during refresh and then the current attention count; `counts-only` privacy also hides the active repository there.
 
 The interactive `/fj` overlay supports filtering and action shortcuts; selecting an item pastes its fully qualified reference into the Pi editor.
 
@@ -345,6 +349,7 @@ Pi packages execute with the same operating-system permissions as Pi. Review pac
 - Comment ownership checks before edit/delete
 - Interactive confirmation for destructive, publication, merge, workflow, and overwrite operations
 - Bounded UTF-8 model output, logs, diffs, timelines, and downloads
+- Watch wake messages restricted to bounded event identifiers, types, actors, review IDs, timestamps, safe status codes, and normalized agent-authored notes; no remote body, title, diff, or raw error text
 
 See [SECURITY.md](SECURITY.md) for private reporting and deployment guidance.
 

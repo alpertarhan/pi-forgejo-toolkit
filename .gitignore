@@ -10,3 +10,4 @@ coverage/
 .pi/forgejo.json
 .pi/npm/
 .pi/git/
+.geto-graph/
