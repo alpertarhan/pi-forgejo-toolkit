@@ -1,4 +1,4 @@
-import { apiPath, ForgejoClient } from "./client.js";
+import { apiPath, type ForgejoClient } from "./client.js";
 import type {
   ForgejoActionArtifact,
   ForgejoActionRun,
@@ -42,7 +42,9 @@ export interface ActionArtifactPage {
   runId?: number;
 }
 
-function requestOptions(signal: AbortSignal | undefined): { signal?: AbortSignal } {
+function requestOptions(signal: AbortSignal | undefined): {
+	signal?: AbortSignal;
+} {
   return signal === undefined ? {} : { signal };
 }
 
@@ -54,7 +56,9 @@ export async function listActionRuns(
 ): Promise<ActionRunPage> {
   const page = Math.max(1, filters.page ?? 1);
   const limit = Math.min(50, Math.max(1, filters.limit ?? 20));
-  const response = await client.request<ForgejoActionRunList>(apiPath("repos", repo.owner, repo.repo, "actions", "runs"), {
+	const response = await client.request<ForgejoActionRunList>(
+		apiPath("repos", repo.owner, repo.repo, "actions", "runs"),
+		{
     ...requestOptions(signal),
     query: {
       page,
@@ -66,11 +70,16 @@ export async function listActionRuns(
       ref: filters.ref,
       workflow_id: filters.workflowId,
     },
-  });
-  const runs = response.data.workflow_runs.filter((run): run is ForgejoActionRun => run !== null);
+		},
+	);
+	const runs = response.data.workflow_runs.filter(
+		(run): run is ForgejoActionRun => run !== null,
+	);
   return {
     runs,
-    total: Number.isFinite(response.data.total_count) ? response.data.total_count : runs.length,
+		total: Number.isFinite(response.data.total_count)
+			? response.data.total_count
+			: runs.length,
     page,
     limit,
   };
@@ -110,16 +119,31 @@ export async function getActionJobLog(
   maxBytes: number,
   signal?: AbortSignal,
 ): Promise<{ log: string; truncated: boolean }> {
-  const response = await client.request<string>(apiPath("repos", repo.owner, repo.repo, "actions", "jobs", jobId, "logs"), {
+	const response = await client.request<string>(
+		apiPath("repos", repo.owner, repo.repo, "actions", "jobs", jobId, "logs"),
+		{
     ...requestOptions(signal),
     accept: "text/plain",
     query: { attempt },
     byteRange: { start: 0, end: maxBytes - 1 },
-  });
-  const truncated = response.status === 206 || response.data.length > maxBytes;
+			maxResponseBytes: maxBytes,
+			truncateResponse: true,
+		},
+	);
+	const bytes = Buffer.from(response.data, "utf8");
+	const contentRange =
+		response.headers
+			.get("content-range")
+			?.match(/^bytes\s+(\d+)-(\d+)\/(\d+|\*)$/i) ?? undefined;
+	const rangeTruncated =
+		contentRange && contentRange[3] !== "*"
+			? Number(contentRange[2]) + 1 < Number(contentRange[3])
+			: response.status === 206;
   return {
-    log: response.data.slice(0, maxBytes),
-    truncated,
+		log: bytes.subarray(0, maxBytes).toString("utf8"),
+		truncated: Boolean(
+			response.truncated || rangeTruncated || bytes.byteLength > maxBytes,
+		),
   };
 }
 
@@ -132,7 +156,15 @@ export async function dispatchActionWorkflow(
   signal?: AbortSignal,
 ): Promise<ForgejoWorkflowDispatchRun | undefined> {
   const response = await client.request<ForgejoWorkflowDispatchRun | undefined>(
-    apiPath("repos", repo.owner, repo.repo, "actions", "workflows", workflow, "dispatches"),
+		apiPath(
+			"repos",
+			repo.owner,
+			repo.repo,
+			"actions",
+			"workflows",
+			workflow,
+			"dispatches",
+		),
     {
       ...requestOptions(signal),
       method: "POST",
@@ -148,10 +180,13 @@ export async function cancelActionRun(
   runId: number,
   signal?: AbortSignal,
 ): Promise<void> {
-  await client.request<void>(apiPath("repos", repo.owner, repo.repo, "actions", "runs", runId, "cancel"), {
+	await client.request<void>(
+		apiPath("repos", repo.owner, repo.repo, "actions", "runs", runId, "cancel"),
+		{
     ...requestOptions(signal),
     method: "POST",
-  });
+		},
+	);
 }
 
 export async function rerunActionRun(
@@ -160,10 +195,13 @@ export async function rerunActionRun(
   runId: number,
   signal?: AbortSignal,
 ): Promise<void> {
-  await client.request<void>(apiPath("repos", repo.owner, repo.repo, "actions", "runs", runId, "rerun"), {
+	await client.request<void>(
+		apiPath("repos", repo.owner, repo.repo, "actions", "runs", runId, "rerun"),
+		{
     ...requestOptions(signal),
     method: "POST",
-  });
+		},
+	);
 }
 
 export async function listActionArtifacts(
@@ -174,9 +212,18 @@ export async function listActionArtifacts(
 ): Promise<ActionArtifactPage> {
   const page = Math.max(1, filters.page ?? 1);
   const limit = Math.min(50, Math.max(1, filters.limit ?? 20));
-  const path = filters.runId === undefined
+	const path =
+		filters.runId === undefined
     ? apiPath("repos", repo.owner, repo.repo, "actions", "artifacts")
-    : apiPath("repos", repo.owner, repo.repo, "actions", "runs", filters.runId, "artifacts");
+			: apiPath(
+					"repos",
+					repo.owner,
+					repo.repo,
+					"actions",
+					"runs",
+					filters.runId,
+					"artifacts",
+				);
   const response = await client.request<ForgejoActionArtifact[]>(path, {
     ...requestOptions(signal),
     query: { name: filters.name, page, limit },
@@ -209,29 +256,47 @@ export async function downloadActionArtifact(
   artifactId: number,
   maxBytes: number,
   signal?: AbortSignal,
-): Promise<Uint8Array> {
-  const response = await client.request<Uint8Array>(
-    apiPath("repos", repo.owner, repo.repo, "actions", "artifacts", artifactId, "zip"),
+): Promise<ReadableStream<Uint8Array>> {
+	const response = await client.request<ReadableStream<Uint8Array>>(
+		apiPath(
+			"repos",
+			repo.owner,
+			repo.repo,
+			"actions",
+			"artifacts",
+			artifactId,
+			"zip",
+		),
     {
       ...requestOptions(signal),
       accept: "application/zip",
-      responseType: "bytes",
+			responseType: "stream",
       maxResponseBytes: maxBytes,
+			timeoutMs: 300_000,
     },
   );
   return response.data;
 }
 
-export function latestFailedActionRuns(runs: ForgejoActionRun[]): ForgejoActionRun[] {
+export function latestFailedActionRuns(
+	runs: ForgejoActionRun[],
+): ForgejoActionRun[] {
   const latest = new Map<string, ForgejoActionRun>();
   for (const run of runs) {
     const key = `${run.workflow_id}\u0000${run.prettyref}`;
     const current = latest.get(key);
     const updated = Date.parse(run.updated) || 0;
     const currentUpdated = current ? Date.parse(current.updated) || 0 : -1;
-    if (!current || updated > currentUpdated || (updated === currentUpdated && run.id > current.id)) latest.set(key, run);
+		if (
+			!current ||
+			updated > currentUpdated ||
+			(updated === currentUpdated && run.id > current.id)
+		)
+			latest.set(key, run);
   }
   return [...latest.values()]
     .filter((run) => run.status === "failure")
-    .sort((left, right) => Date.parse(right.updated) - Date.parse(left.updated));
+		.sort(
+			(left, right) => Date.parse(right.updated) - Date.parse(left.updated),
+		);
 }

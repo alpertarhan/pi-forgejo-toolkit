@@ -1,4 +1,4 @@
-import { ForgejoClientPool, ForgejoError } from "../client.js";
+import { type ForgejoClientPool, ForgejoError } from "../client.js";
 import { CredentialError } from "../credentials.js";
 import { queryServerDashboard } from "./query.js";
 import type {
@@ -34,10 +34,18 @@ function initialServer(alias: string): ServerDashboard {
 }
 
 function sameRepo(item: DashboardItem, repo: RepoRef | undefined): boolean {
-  return Boolean(repo && item.server === repo.server && item.owner === repo.owner && item.repo === repo.repo);
+	return Boolean(
+		repo &&
+			item.server === repo.server &&
+			item.owner === repo.owner &&
+			item.repo === repo.repo,
+	);
 }
 
-function sameRepoRef(left: RepoRef | undefined, right: RepoRef | undefined): boolean {
+function sameRepoRef(
+	left: RepoRef | undefined,
+	right: RepoRef | undefined,
+): boolean {
   return (
     left?.server === right?.server &&
     left?.owner === right?.owner &&
@@ -50,21 +58,34 @@ function clearFailedRuns(server: ServerDashboard): ServerDashboard {
   return { ...current, failedRuns: { ...EMPTY_COLLECTION } };
 }
 
-
-function attentionItems(servers: Record<string, ServerDashboard>, activeRepo: RepoRef | undefined): DashboardItem[] {
+function attentionItems(
+	servers: Record<string, ServerDashboard>,
+	activeRepo: RepoRef | undefined,
+): DashboardItem[] {
   const unique = new Map<string, DashboardItem>();
   for (const server of Object.values(servers)) {
-    const candidates = [...server.reviewRequests.items, ...server.failedRuns.items, ...server.notifications.items, ...server.assignedIssues.items];
+		const candidates = [
+			...server.reviewRequests.items,
+			...server.failedRuns.items,
+			...server.notifications.items,
+			...server.assignedIssues.items,
+		];
     for (const item of candidates) {
       const identity = `${item.server}:${item.owner}/${item.repo}:${item.resourceKind}:${item.index ?? item.key}`;
       const current = unique.get(identity);
-      if (!current || PRIORITY_BY_KIND[item.kind] < PRIORITY_BY_KIND[current.kind]) unique.set(identity, item);
+			if (
+				!current ||
+				PRIORITY_BY_KIND[item.kind] < PRIORITY_BY_KIND[current.kind]
+			)
+				unique.set(identity, item);
     }
   }
   return [...unique.values()].sort((left, right) => {
-    const activeDifference = Number(sameRepo(right, activeRepo)) - Number(sameRepo(left, activeRepo));
+		const activeDifference =
+			Number(sameRepo(right, activeRepo)) - Number(sameRepo(left, activeRepo));
     if (activeDifference !== 0) return activeDifference;
-    const priorityDifference = PRIORITY_BY_KIND[left.kind] - PRIORITY_BY_KIND[right.kind];
+		const priorityDifference =
+			PRIORITY_BY_KIND[left.kind] - PRIORITY_BY_KIND[right.kind];
     if (priorityDifference !== 0) return priorityDifference;
     return Date.parse(right.updatedAt) - Date.parse(left.updatedAt);
   });
@@ -91,19 +112,27 @@ function totals(servers: Record<string, ServerDashboard>): DashboardTotals {
 export class DashboardStore {
   private snapshotValue: DashboardSnapshot;
   private readonly listeners = new Set<() => void>();
-  private controller?: AbortController;
+	private controller: AbortController | undefined;
   private generation = 0;
   private closed = false;
   private invalidationVersion = 0;
   private refreshedVersion = 0;
+	private scheduledRefresh: Promise<DashboardSnapshot> | undefined;
 
   constructor(
     private readonly clients: ForgejoClientPool,
     private readonly previewLimit: number,
     activeRepo?: RepoRef,
-    private readonly identityForServer?: (alias: string) => ForgejoUser | undefined,
+		private readonly identityForServer?: (
+			alias: string,
+		) => ForgejoUser | undefined,
+		private readonly actionsRunsForServer?: (
+			alias: string,
+		) => "available" | "unavailable" | "unknown",
   ) {
-    const servers = Object.fromEntries(clients.aliases().map((alias) => [alias, initialServer(alias)]));
+		const servers = Object.fromEntries(
+			clients.aliases().map((alias) => [alias, initialServer(alias)]),
+		);
     this.snapshotValue = {
       servers,
       totals: totals(servers),
@@ -129,17 +158,27 @@ export class DashboardStore {
     this.snapshotValue = {
       ...this.snapshotValue,
       servers: Object.fromEntries(
-        Object.entries(this.snapshotValue.servers).map(([alias, server]) => [alias, clearFailedRuns(server)]),
+				Object.entries(this.snapshotValue.servers).map(([alias, server]) => [
+					alias,
+					clearFailedRuns(server),
+				]),
       ),
     };
   }
 
   setActiveRepo(repo: RepoRef | undefined): void {
+		this.controller?.abort();
+		this.generation += 1;
     this.clearActiveRepoData(repo);
-    if (repo) this.snapshotValue = { ...this.snapshotValue, activeRepo: repo };
+		if (repo)
+			this.snapshotValue = {
+				...this.snapshotValue,
+				activeRepo: repo,
+				refreshing: false,
+			};
     else {
       const { activeRepo: _removed, ...snapshot } = this.snapshotValue;
-      this.snapshotValue = snapshot;
+			this.snapshotValue = { ...snapshot, refreshing: false };
     }
     this.invalidationVersion += 1;
     this.recalculate();
@@ -149,22 +188,49 @@ export class DashboardStore {
     this.snapshotValue = {
       ...this.snapshotValue,
       totals: totals(this.snapshotValue.servers),
-      attention: attentionItems(this.snapshotValue.servers, this.snapshotValue.activeRepo),
+			attention: attentionItems(
+				this.snapshotValue.servers,
+				this.snapshotValue.activeRepo,
+			),
     };
     for (const listener of this.listeners) listener();
   }
 
   async ensureFresh(externalSignal?: AbortSignal): Promise<DashboardSnapshot> {
-    if (!this.snapshotValue.fetchedAt || this.refreshedVersion !== this.invalidationVersion) {
+		if (
+			!this.snapshotValue.fetchedAt ||
+			this.refreshedVersion !== this.invalidationVersion
+		) {
       return this.refresh(externalSignal);
     }
     return this.snapshotValue;
   }
 
-  async refreshIfObserved(externalSignal?: AbortSignal): Promise<DashboardSnapshot> {
+	async refreshIfObserved(
+		_externalSignal?: AbortSignal,
+	): Promise<DashboardSnapshot> {
     this.invalidationVersion += 1;
-    if (this.listeners.size === 0) return this.snapshotValue;
-    return this.refresh(externalSignal);
+		if (this.listeners.size === 0 || this.closed) return this.snapshotValue;
+		if (!this.scheduledRefresh) {
+			this.scheduledRefresh = new Promise<void>((resolve) =>
+				setTimeout(resolve, 0),
+			)
+				.then(() => this.refresh())
+				.catch((error: unknown) => {
+					this.snapshotValue = {
+						...this.snapshotValue,
+						backgroundError:
+							error instanceof Error ? error.message : String(error),
+						refreshing: false,
+					};
+					this.recalculate();
+					return this.snapshotValue;
+				})
+				.finally(() => {
+					this.scheduledRefresh = undefined;
+				});
+		}
+		return this.snapshotValue;
   }
 
   async refresh(externalSignal?: AbortSignal): Promise<DashboardSnapshot> {
@@ -172,15 +238,21 @@ export class DashboardStore {
     this.controller?.abort();
     const controller = new AbortController();
     this.controller = controller;
+		const abortFromExternal = (): void =>
+			controller.abort(externalSignal?.reason);
     if (externalSignal) {
-      if (externalSignal.aborted) controller.abort(externalSignal.reason);
-      else externalSignal.addEventListener("abort", () => controller.abort(externalSignal.reason), { once: true });
+			if (externalSignal.aborted) abortFromExternal();
+			else
+				externalSignal.addEventListener("abort", abortFromExternal, {
+					once: true,
+				});
     }
     const generation = ++this.generation;
     const invalidationVersion = this.invalidationVersion;
     this.snapshotValue = { ...this.snapshotValue, refreshing: true };
     this.recalculate();
 
+		try {
     await Promise.all(
       this.clients.entries().map(async ([alias, client]) => {
         try {
@@ -191,17 +263,20 @@ export class DashboardStore {
             controller.signal,
             identity,
             this.snapshotValue.activeRepo,
+							this.actionsRunsForServer?.(alias),
           );
-          if (generation !== this.generation || controller.signal.aborted) return;
+						if (generation === this.generation && !controller.signal.aborted) {
           this.snapshotValue = {
             ...this.snapshotValue,
             servers: { ...this.snapshotValue.servers, [alias]: dashboard },
           };
           this.recalculate();
+						}
         } catch (error) {
-          if (generation !== this.generation || controller.signal.aborted) return;
+						if (generation === this.generation && !controller.signal.aborted) {
           const health =
-            (error instanceof ForgejoError && error.code === "auth") || error instanceof CredentialError
+								(error instanceof ForgejoError && error.code === "auth") ||
+								error instanceof CredentialError
               ? "auth-error"
               : "error";
           const failed: ServerDashboard = {
@@ -215,19 +290,29 @@ export class DashboardStore {
           };
           this.recalculate();
         }
+					}
+					return undefined;
       }),
     );
 
-    if (generation === this.generation) {
+			if (generation === this.generation && !controller.signal.aborted) {
       this.refreshedVersion = invalidationVersion;
+				const { backgroundError: _cleared, ...snapshot } = this.snapshotValue;
       this.snapshotValue = {
-        ...this.snapshotValue,
+					...snapshot,
         fetchedAt: new Date().toISOString(),
         refreshing: false,
       };
       this.recalculate();
+			} else if (generation === this.generation) {
+				this.snapshotValue = { ...this.snapshotValue, refreshing: false };
+				this.recalculate();
     }
     return this.snapshotValue;
+		} finally {
+			externalSignal?.removeEventListener("abort", abortFromExternal);
+			if (this.controller === controller) this.controller = undefined;
+		}
   }
 
   close(): void {

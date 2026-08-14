@@ -147,6 +147,67 @@ function comment(issue: number) {
 }
 
 describe("issue conversation lifecycle", () => {
+	it("passes issue pagination through and verifies close/reopen state transitions", async () => {
+		const listRequest = vi.fn(
+			async (_path: string, options?: RequestOptions) => {
+				expect(options?.query).toMatchObject({ page: 2, limit: 10 });
+				return apiResult([]);
+			},
+		);
+		const listTool = captureTool(
+			registerIssueTool,
+			resourceRuntime(issueRef, listRequest),
+		);
+		await listTool.execute(
+			"list-page",
+			{ action: "list", ref: "work:acme/app#12", page: 2, limit: 10 },
+			signal,
+			undefined,
+			noUi,
+		);
+
+		const unchanged = {
+			id: 12,
+			number: 12,
+			title: "Still open",
+			state: "open",
+			updated_at: "2026-08-12T10:00:00Z",
+		};
+		const closeTool = captureTool(
+			registerIssueTool,
+			resourceRuntime(
+				issueRef,
+				vi.fn(async () => apiResult(unchanged)),
+			),
+		);
+		await expect(
+			closeTool.execute(
+				"close-noop",
+				{ action: "close", ref: "work:acme/app#12" },
+				signal,
+				undefined,
+				confirmedContext().ctx,
+			),
+		).rejects.toThrow("did not close");
+
+		const reopenTool = captureTool(
+			registerIssueTool,
+			resourceRuntime(
+				issueRef,
+				vi.fn(async () => apiResult({ ...unchanged, state: "closed" })),
+			),
+		);
+		await expect(
+			reopenTool.execute(
+				"reopen-noop",
+				{ action: "reopen", ref: "work:acme/app#12" },
+				signal,
+				undefined,
+				noUi,
+			),
+		).rejects.toThrow("did not reopen");
+	});
+
 	it("validates comment ownership and confirmation before deletion", async () => {
 		let targetIssue = 99;
 		const request = vi.fn(async (path: string, options?: RequestOptions) => {
@@ -437,6 +498,79 @@ describe("issue and pull metadata mutations", () => {
 			),
 		).rejects.toThrow("RFC 3339 timestamp with a timezone");
 		expect(request).toHaveBeenCalledTimes(callsAfterMilestone);
+	});
+
+	it("uses resource-specific label endpoints and preserves pull planning mutations", async () => {
+		const label = { id: 7, name: "security", color: "ff0000" };
+		const issueRequest = vi.fn(
+			async (path: string, options?: RequestOptions) => {
+				if (path === "repos/acme/app/labels") return apiResult([label], 1);
+				expect(path).toBe("repos/acme/app/issues/12/labels");
+				expect(options).toMatchObject({ method: "PUT", body: { labels: [7] } });
+				return apiResult([label]);
+			},
+		);
+		const issueTool = captureTool(
+			registerIssueTool,
+			resourceRuntime(issueRef, issueRequest),
+		);
+		await issueTool.execute(
+			"issue-labels",
+			{ action: "set_labels", ref: "work:acme/app#12", labels: ["security"] },
+			signal,
+			undefined,
+			noUi,
+		);
+
+		const pullRequest = vi.fn(
+			async (path: string, options?: RequestOptions) => {
+				if (path === "repos/acme/app/labels") return apiResult([label], 1);
+				expect(path).toBe("repos/acme/app/pulls/9");
+				const body = options?.body as {
+					labels?: number[];
+					assignees?: string[];
+				};
+				if (body.labels)
+					expect(options).toMatchObject({
+						method: "PATCH",
+						body: { labels: [7] },
+					});
+				else
+					expect(options).toMatchObject({
+						method: "PATCH",
+						body: { assignees: ["alice"] },
+					});
+				return apiResult({
+					id: 9,
+					number: 9,
+					title: "Safe change",
+					state: "open",
+					updated_at: "2026-08-12T10:00:00Z",
+					head: { ref: "feature", sha: "head-sha" },
+					base: { ref: "main", sha: "base-sha" },
+					labels: body.labels ? [label] : [],
+					assignees: body.assignees?.map((login) => ({ id: 1, login })) ?? [],
+				});
+			},
+		);
+		const pullTool = captureTool(
+			registerPullTool,
+			resourceRuntime(pullRef, pullRequest),
+		);
+		await pullTool.execute(
+			"pull-labels",
+			{ action: "set_labels", ref: "work:acme/app!9", labels: ["security"] },
+			signal,
+			undefined,
+			noUi,
+		);
+		await pullTool.execute(
+			"pull-assignees",
+			{ action: "set_assignees", ref: "work:acme/app!9", assignees: ["alice"] },
+			signal,
+			undefined,
+			noUi,
+		);
 	});
 
 	it("marks a draft ready only after confirmation and verifies the returned state", async () => {

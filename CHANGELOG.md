@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-14
+
 ### Added
 
 - Added the lazy `forgejo_watch` domain for session-scoped one-shot issue and pull-request timeline watches, with start/list/stop controls and metadata-only Pi wake messages.
@@ -13,10 +15,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Changed
 
 - The dashboard widget, popup notifier, and automatic polling now start only when local Git remotes match a configured Forgejo server; explicit dashboard commands remain available elsewhere.
+- Dashboard mutation refreshes are coalesced in the background, capability discovery is cached per server, explicit refreshes bypass that cache, and unsupported Actions polling is skipped.
 - Incremental timeline scans now tolerate Forgejo pagination limits and local/server clock skew, cancel failed polls cleanly, deduplicate transition events, and bound watch-list model output.
+- Large HTTP responses and artifact downloads are streamed with byte limits and request deadlines; merge readiness and label resolution page through complete decision inputs.
+- Issue and pull-request comments, subscriptions, and planning metadata now share one verified mutation path to prevent behavior drift.
+- GitHub Actions are pinned to immutable commits, release caches are disabled, Dependabot updates use a seven-day cooldown, and CI compiles/imports the extension under the minimum Node runtime.
+
+### Fixed
+
+- Fixed issue-list and server-clamped metadata pagination, issue-specific label updates, issue state-transition verification, UTF-8/job-log truncation, dashboard abort/repository races and privacy rendering, timeline cursor gaps, malformed reference handling, and remote base-path matching.
 
 ### Security
 
+- Project-local Forgejo configuration and Git/SSH discovery are ignored until the project is trusted.
+- Authenticated redirects cannot leave the configured API root; external links use validated HTTP(S) URLs and a shell-free Windows launcher.
 - Watch notifications exclude remote bodies, titles, diffs, and raw errors; session shutdown closes active watches before runtime teardown.
 
 ## [0.3.0] - 2026-08-12
@@ -62,7 +74,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `forgejo-issue-to-pr` and `forgejo-pr-review` workflow skills.
 - Environment-variable and `fgj` credential providers with redirect and secret-redaction protections.
 
-[Unreleased]: https://github.com/alpertarhan/pi-forgejo-toolkit/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/alpertarhan/pi-forgejo-toolkit/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/alpertarhan/pi-forgejo-toolkit/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/alpertarhan/pi-forgejo-toolkit/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/alpertarhan/pi-forgejo-toolkit/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/alpertarhan/pi-forgejo-toolkit/compare/v0.2.0...v0.2.1

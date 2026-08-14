@@ -81,23 +81,18 @@ export async function scanTimeline(
 	let total: number | undefined;
 	let complete = false;
 	let pages = 0;
-	let serverTime: string | undefined;
 	for (let page = 1; page <= maxPages; page += 1) {
 		const response = await client.request<ForgejoTimelineEvent[]>(path, {
 			...requestOptions(signal),
 			query: { page, limit: pageLimit, since, before },
 		});
 		pages = page;
-		serverTime = responseTimestamp(response.headers) ?? serverTime;
 		if (response.totalCount !== undefined) total = response.totalCount;
 		for (const event of response.data) byId.set(event.id, event);
 		const hasMore =
-			hasNextPage(response.headers) ||
-			(total === undefined
-				? response.data.length === pageLimit
-				: byId.size < total && response.data.length > 0);
+			hasNextPage(response.headers) || response.data.length === pageLimit;
 		if (hasMore) continue;
-		complete = total === undefined || byId.size >= total;
+		complete = true;
 		break;
 	}
 	const events = [...byId.values()].sort((left, right) => {
@@ -105,17 +100,11 @@ export async function scanTimeline(
 			Date.parse(left.created_at) - Date.parse(right.created_at);
 		return timestampOrder || left.id - right.id;
 	});
-	const latestEventTime = events.reduce<string | undefined>((latest, event) => {
-		if (!Number.isFinite(Date.parse(event.updated_at))) return latest;
-		const candidate = new Date(event.updated_at).toISOString();
-		if (latest !== undefined && candidate <= latest) return latest;
-		return candidate;
-	}, undefined);
 	const result: TimelineScan = {
 		events,
 		pages,
 		complete,
-		fetchedThrough: serverTime ?? latestEventTime ?? before,
+		fetchedThrough: before,
 	};
 	if (total !== undefined) result.total = total;
 	return result;

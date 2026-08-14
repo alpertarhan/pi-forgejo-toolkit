@@ -250,6 +250,54 @@ describe("DashboardStore", () => {
 		store.close();
 	});
 
+	it("does not mark an aborted refresh fresh or commit results for the previous repository", async () => {
+		let releaseRuns: ((response: Response) => void) | undefined;
+		const runs = new Promise<Response>((resolve) => {
+			releaseRuns = resolve;
+		});
+		const fetchImpl = vi.fn<typeof fetch>(async (input) => {
+			const url = new URL(String(input));
+			if (url.pathname.endsWith("/user"))
+				return jsonResponse({ id: 7, login: "alice" });
+			if (
+				url.pathname.endsWith("/repos/issues/search") ||
+				url.pathname.endsWith("/notifications")
+			)
+				return jsonResponse([]);
+			if (url.pathname.endsWith("/actions/runs")) return runs;
+			throw new Error(`unexpected request: ${url}`);
+		});
+		const store = new DashboardStore(clients(fetchImpl, false), 3, {
+			server: "work",
+			owner: "acme",
+			repo: "app",
+		});
+		const refreshing = store.refresh();
+		await Promise.resolve();
+		store.setActiveRepo({ server: "work", owner: "acme", repo: "next" });
+		releaseRuns?.(jsonResponse({ total_count: 0, workflow_runs: [] }));
+		await refreshing;
+		expect(store.snapshot().activeRepo?.repo).toBe("next");
+		expect(store.snapshot().fetchedAt).toBeUndefined();
+		expect(store.snapshot().refreshing).toBe(false);
+		store.close();
+	});
+
+	it("keeps an externally aborted refresh stale so ensureFresh retries", async () => {
+		const store = new DashboardStore(
+			clients(dashboardFetch({ review: false, failWork: false }), false),
+			3,
+		);
+		const controller = new AbortController();
+		controller.abort(new Error("cancelled"));
+		await store.refresh(controller.signal);
+		expect(store.snapshot().fetchedAt).toBeUndefined();
+		expect(store.snapshot().refreshing).toBe(false);
+		await store.ensureFresh();
+		expect(store.snapshot().fetchedAt).toBeDefined();
+		store.close();
+	});
+
 	it("clears repository-scoped CI runs immediately when repository context changes", async () => {
 		const state = { review: false, failWork: false };
 		const store = new DashboardStore(clients(dashboardFetch(state), false), 3, {
@@ -300,7 +348,7 @@ describe("DashboardStore", () => {
 		store.close();
 	});
 
-	it("does not notify on initial load and deduplicates later review requests", async () => {
+	it("does not notify on initial load, deduplicates present items, and re-notifies after removal", async () => {
 		const state = { review: false, failWork: false };
 		const store = new DashboardStore(clients(dashboardFetch(state), false), 3);
 		const notify = vi.fn();
@@ -315,6 +363,11 @@ describe("DashboardStore", () => {
 
 		await store.refresh();
 		expect(notify).toHaveBeenCalledTimes(1);
+		state.review = false;
+		await store.refresh();
+		state.review = true;
+		await store.refresh();
+		expect(notify).toHaveBeenCalledTimes(2);
 		notifier.close();
 		store.close();
 	});
@@ -329,13 +382,37 @@ describe("DashboardStore", () => {
 		expect(store.snapshot().fetchedAt).toBeUndefined();
 
 		const unsubscribe = store.subscribe(() => undefined);
-		await store.refreshIfObserved();
-		expect(refresh).toHaveBeenCalledOnce();
-		expect(store.snapshot().fetchedAt).toBeDefined();
+		await Promise.all([store.refreshIfObserved(), store.refreshIfObserved()]);
+		expect(refresh).not.toHaveBeenCalled();
+		await vi.waitFor(() => expect(refresh).toHaveBeenCalledOnce());
+		await vi.waitFor(() => expect(store.snapshot().fetchedAt).toBeDefined());
 
 		unsubscribe();
 		await store.refreshIfObserved();
 		expect(refresh).toHaveBeenCalledOnce();
+		store.close();
+	});
+
+	it("exposes unexpected background refresh failures and clears them after recovery", async () => {
+		const state = { review: false, failWork: false };
+		const store = new DashboardStore(clients(dashboardFetch(state), false), 3);
+		const unsubscribe = store.subscribe(() => undefined);
+		const refresh = vi
+			.spyOn(store, "refresh")
+			.mockRejectedValueOnce(new Error("refresh exploded"));
+
+		await store.refreshIfObserved();
+		await vi.waitFor(() =>
+			expect(store.snapshot().backgroundError).toBe("refresh exploded"),
+		);
+		expect(renderDashboardStatus(store.snapshot(), "counts-only")).toBe(
+			"fj all · refresh failed",
+		);
+
+		refresh.mockRestore();
+		await store.refresh();
+		expect(store.snapshot().backgroundError).toBeUndefined();
+		unsubscribe();
 		store.close();
 	});
 
@@ -375,6 +452,14 @@ describe("DashboardStore", () => {
 		const wide = renderWidgetLines(store.snapshot(), 100, theme, "full");
 		expect(compact).toHaveLength(1);
 		expect(compact[0]).toContain("I:4 P:2 R:1 N:7 C:1");
+		const privateCompact = renderWidgetLines(
+			store.snapshot(),
+			45,
+			theme,
+			"counts-only",
+		);
+		expect(privateCompact[0]).toContain("fj all I:4 P:2 R:1 N:7 C:1");
+		expect(privateCompact[0]).not.toContain("acme/app");
 		expect(wide).toHaveLength(3);
 		expect(wide[1]).toBe(
 			"Issues 4 | My Open PRs 2 | Reviews 1 | Inbox 7 | CI failed 1",

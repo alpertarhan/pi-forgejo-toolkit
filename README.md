@@ -47,7 +47,7 @@ Alternative package sources:
 pi install git:github.com/alpertarhan/pi-forgejo-toolkit
 
 # Pin an exact npm version
-pi install npm:pi-forgejo-toolkit@0.3.0
+pi install npm:pi-forgejo-toolkit@0.4.0
 ```
 
 Update an unpinned install with:
@@ -118,7 +118,7 @@ Configuration is loaded from two locations:
 - Global: `~/.pi/agent/forgejo.json`
 - Project: `<project>/.pi/forgejo.json`
 
-Set `PI_FORGEJO_CONFIG=/absolute/path/to/forgejo.json` to override the global path. Project configuration can add or replace server aliases and override dashboard fields.
+Set `PI_FORGEJO_CONFIG=/absolute/path/to/forgejo.json` to override the global path. Trusted project configuration can add or replace server aliases and override dashboard fields. Project-local configuration and Git/SSH repository discovery are ignored until Pi marks the project trusted; global configuration remains available.
 
 Inline plaintext token fields are rejected. Use the CLI-independent `env` provider with `tokenEnv`, or use the optional `fgj` provider.
 
@@ -295,7 +295,7 @@ This reduces model context without persisting potentially sensitive issue bodies
 
 ## Pull-request reviews and merges
 
-Review drafts stay in memory until discarded or submitted. Inline comments are previewed with file and line positions. Submission always shows the complete draft and requires interactive confirmation.
+Review drafts stay in memory until discarded or submitted. Replacing an existing draft requires `replace: true`. Inline comments are previewed with file and line positions. Submission always shows the complete draft and requires interactive confirmation.
 
 Merge operations:
 
@@ -341,13 +341,14 @@ Pi packages execute with the same operating-system permissions as Pi. Review pac
 
 - No plaintext token configuration
 - Separate credential providers and cached credentials per server
-- Authorization headers are never forwarded across redirects
-- Same-origin Swagger capability discovery without credentials
+- Project-local configuration and repository discovery are disabled for untrusted projects
+- Authorization headers are never forwarded outside the configured Forgejo API root
+- Redirect-free Swagger capability discovery without credentials
 - Token redaction in HTTP errors
 - No automatic retry of mutations
 - Exact server/repository identity for every mutation
 - Comment ownership checks before edit/delete
-- Interactive confirmation for destructive, publication, merge, workflow, and overwrite operations
+- Interactive confirmation for destructive comment deletion, review publication, merges, workflow mutations, and artifact overwrites
 - Bounded UTF-8 model output, logs, diffs, timelines, and downloads
 - Watch wake messages restricted to bounded event identifiers, types, actors, review IDs, timestamps, safe status codes, and normalized agent-authored notes; no remote body, title, diff, or raw error text
 

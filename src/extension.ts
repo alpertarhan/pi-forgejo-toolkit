@@ -28,15 +28,54 @@ export function dashboardStartsAutomatically(
 	return enabled && status !== "none";
 }
 
-async function openExternal(pi: ExtensionAPI, url: string): Promise<void> {
-	const application =
-		process.platform === "darwin"
-			? "open"
-			: process.platform === "win32"
-				? "cmd"
-				: "xdg-open";
-	const args = process.platform === "win32" ? ["/c", "start", "", url] : [url];
-	const result = await pi.exec(application, args, { timeout: 5_000 });
+function parseHttpUrl(url: string): URL {
+	let parsed: URL;
+	try {
+		parsed = new URL(url);
+	} catch {
+		throw new Error("Forgejo link must be an absolute http(s) URL");
+	}
+	if (parsed.protocol !== "https:" && parsed.protocol !== "http:")
+		throw new Error("Forgejo link must use http or https");
+	return parsed;
+}
+
+export function forgejoWebUrl(url: string, expectedBaseUrl?: string): URL {
+	const target = parseHttpUrl(url);
+	if (!expectedBaseUrl) return target;
+	const base = parseHttpUrl(expectedBaseUrl);
+	const basePath = base.pathname.replace(/\/+$/, "");
+	if (
+		target.origin !== base.origin ||
+		(basePath &&
+			target.pathname !== basePath &&
+			!target.pathname.startsWith(`${basePath}/`))
+	) {
+		throw new Error("Forgejo link leaves the configured server URL");
+	}
+	return target;
+}
+
+export function externalOpenCommand(
+	url: string,
+	platform: NodeJS.Platform = process.platform,
+): { command: string; args: string[] } {
+	const normalizedUrl = forgejoWebUrl(url).href;
+	return platform === "darwin"
+		? { command: "open", args: [normalizedUrl] }
+		: platform === "win32"
+			? { command: "explorer.exe", args: [normalizedUrl] }
+			: { command: "xdg-open", args: [normalizedUrl] };
+}
+
+async function openExternal(
+	pi: ExtensionAPI,
+	url: string,
+	expectedBaseUrl?: string,
+): Promise<void> {
+	const target = forgejoWebUrl(url, expectedBaseUrl);
+	const { command, args } = externalOpenCommand(target.href);
+	const result = await pi.exec(command, args, { timeout: 5_000 });
 	if (result.code !== 0)
 		throw new Error(result.stderr.trim() || `failed to open ${url}`);
 }
@@ -112,7 +151,7 @@ export default function forgejoExtension(pi: ExtensionAPI): void {
 	const refresh = async (signal?: AbortSignal) => {
 		const current = requireRuntime();
 		const [, snapshot] = await Promise.all([
-			current.capabilities.refresh(signal),
+			current.capabilities.refresh(signal, true),
 			current.dashboard.refresh(signal),
 		]);
 		return snapshot;
@@ -265,7 +304,7 @@ export default function forgejoExtension(pi: ExtensionAPI): void {
 		description: "Check every configured Forgejo server and token",
 		handler: async (_args, ctx) => {
 			const current = requireRuntime();
-			const snapshot = await current.capabilities.refresh();
+			const snapshot = await current.capabilities.refresh(undefined, true);
 			const lines = current.clients
 				.aliases()
 				.map((alias) =>
@@ -334,14 +373,14 @@ export default function forgejoExtension(pi: ExtensionAPI): void {
 				if (!ref) throw new Error(`invalid Forgejo reference '${value}'`);
 				const server = current.config.servers[ref.server];
 				if (!server) throw new Error(`unknown server '${ref.server}'`);
-				await openExternal(pi, resourceWebUrl(ref, server));
+				await openExternal(pi, resourceWebUrl(ref, server), server.baseUrl);
 				return;
 			}
 			const repo = current.currentRepo();
 			if (!repo) throw new Error("no active Forgejo repository");
 			const server = current.config.servers[repo.server];
 			if (!server) throw new Error(`unknown server '${repo.server}'`);
-			await openExternal(pi, repoWebUrl(repo, server));
+			await openExternal(pi, repoWebUrl(repo, server), server.baseUrl);
 		},
 	});
 
@@ -361,7 +400,11 @@ export default function forgejoExtension(pi: ExtensionAPI): void {
 						() => tui.requestRender(),
 						(reference) => done(reference),
 						() => done(null),
-						(url) => openExternal(pi, url),
+						(item) => {
+							const server = current.config.servers[item.server];
+							if (!server) throw new Error(`unknown server '${item.server}'`);
+							return openExternal(pi, item.webUrl, server.baseUrl);
+						},
 						() => current.dashboard.refresh().then(() => undefined),
 						async (item: DashboardItem) => {
 							if (item.sourceId === undefined)
@@ -401,6 +444,7 @@ export default function forgejoExtension(pi: ExtensionAPI): void {
 				async (command, args, options) => pi.exec(command, args, options),
 				process.env,
 				fetch,
+				ctx.isProjectTrusted(),
 			);
 		} catch (error) {
 			startupError = error instanceof Error ? error : new Error(String(error));

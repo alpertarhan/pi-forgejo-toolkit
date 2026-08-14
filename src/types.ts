@@ -107,7 +107,6 @@ export interface ForgejoTeam {
   name: string;
 }
 
-
 export interface ForgejoIssue {
   id: number;
   number: number;
@@ -324,7 +323,13 @@ export interface ForgejoWorkflowDispatchRun {
   jobs: string[];
 }
 
-export type ForgejoCommitStatusState = "pending" | "success" | "error" | "failure" | "warning" | "skipped";
+export type ForgejoCommitStatusState =
+	| "pending"
+	| "success"
+	| "error"
+	| "failure"
+	| "warning"
+	| "skipped";
 
 export interface ForgejoCommitStatus {
   id: number;
@@ -347,7 +352,13 @@ export interface ForgejoPullReview {
   id: number;
   user?: ForgejoUser;
   team?: ForgejoTeam;
-  state: "PENDING" | "APPROVED" | "REQUEST_CHANGES" | "COMMENT" | "REQUEST_REVIEW" | string;
+	state:
+		| "PENDING"
+		| "APPROVED"
+		| "REQUEST_CHANGES"
+		| "COMMENT"
+		| "REQUEST_REVIEW"
+		| string;
   body?: string;
   official?: boolean;
   stale?: boolean;
@@ -422,10 +433,16 @@ export interface ApiResult<T> {
   status: number;
   headers: Headers;
   totalCount?: number;
+	truncated?: boolean;
 }
 
 export type ServerHealth = "loading" | "ready" | "auth-error" | "error";
-export type DashboardItemKind = "assigned" | "authored-pull" | "review" | "notification" | "ci-failed";
+export type DashboardItemKind =
+	| "assigned"
+	| "authored-pull"
+	| "review"
+	| "notification"
+	| "ci-failed";
 
 export interface DashboardItem {
   key: string;
@@ -471,6 +488,7 @@ export interface DashboardTotals {
 
 export interface DashboardSnapshot {
   fetchedAt?: string;
+	backgroundError?: string;
   activeRepo?: RepoRef;
   servers: Record<ServerAlias, ServerDashboard>;
   totals: DashboardTotals;
@@ -478,7 +496,10 @@ export interface DashboardSnapshot {
   refreshing: boolean;
 }
 
-export type ForgejoFeatureAvailability = "unknown" | "available" | "unavailable";
+export type ForgejoFeatureAvailability =
+	| "unknown"
+	| "available"
+	| "unavailable";
 
 export interface ForgejoCapabilities {
   server: ServerAlias;

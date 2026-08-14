@@ -1,12 +1,18 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import { Key, matchesKey, truncateToWidth, type Component } from "@earendil-works/pi-tui";
+import {
+	Key,
+	matchesKey,
+	truncateToWidth,
+	type Component,
+} from "@earendil-works/pi-tui";
 import { formatResourceRef } from "../refs.js";
 import type { DashboardItem, ResourceRef } from "../types.js";
-import { DashboardStore } from "./store.js";
+import type { DashboardStore } from "./store.js";
 import { formatRelativeAge } from "./widget.js";
 
 function itemReference(item: DashboardItem): string {
-  if (item.index === undefined || item.resourceKind === "repository") return `${item.server}:${item.owner}/${item.repo}`;
+	if (item.index === undefined || item.resourceKind === "repository")
+		return `${item.server}:${item.owner}/${item.repo}`;
   const ref: ResourceRef = {
     server: item.server,
     owner: item.owner,
@@ -21,7 +27,9 @@ function allDashboardItems(store: DashboardStore): DashboardItem[] {
   const snapshot = store.snapshot();
   const items = [
     ...snapshot.attention,
-    ...Object.values(snapshot.servers).flatMap((server) => server.authoredPulls.items),
+		...Object.values(snapshot.servers).flatMap(
+			(server) => server.authoredPulls.items,
+		),
   ];
   const seen = new Set<string>();
   return items.filter((item) => {
@@ -46,13 +54,15 @@ export class DashboardOverlay implements Component {
     private readonly requestRender: () => void,
     private readonly onSelect: (reference: string) => void,
     private readonly onClose: () => void,
-    private readonly onOpen: (url: string) => Promise<void>,
+		private readonly onOpen: (item: DashboardItem) => Promise<void>,
     private readonly onRefresh: () => Promise<void>,
     private readonly onMarkRead: (item: DashboardItem) => Promise<void>,
     initialFilter?: string,
   ) {
     this.filters = ["all", "current", ...Object.keys(store.snapshot().servers)];
-    const requestedFilter = initialFilter ? this.filters.indexOf(initialFilter) : -1;
+		const requestedFilter = initialFilter
+			? this.filters.indexOf(initialFilter)
+			: -1;
     if (requestedFilter >= 0) this.filterIndex = requestedFilter;
     this.rebuildItems();
     this.unsubscribe = store.subscribe(() => {
@@ -67,7 +77,12 @@ export class DashboardOverlay implements Component {
     this.items = allDashboardItems(this.store).filter((item) => {
       if (filter === "all") return true;
       if (filter === "current") {
-        return Boolean(activeRepo && item.server === activeRepo.server && item.owner === activeRepo.owner && item.repo === activeRepo.repo);
+				return Boolean(
+					activeRepo &&
+						item.server === activeRepo.server &&
+						item.owner === activeRepo.owner &&
+						item.repo === activeRepo.repo,
+				);
       }
       return item.server === filter;
     });
@@ -94,7 +109,10 @@ export class DashboardOverlay implements Component {
       this.requestRender();
       return;
     }
-    if ((matchesKey(data, Key.down) || data === "j") && this.selected < this.items.length - 1) {
+		if (
+			(matchesKey(data, Key.down) || data === "j") &&
+			this.selected < this.items.length - 1
+		) {
       this.selected += 1;
       this.requestRender();
       return;
@@ -112,7 +130,7 @@ export class DashboardOverlay implements Component {
     }
     if (data === "o") {
       const item = this.items[this.selected];
-      if (item) this.runAction(() => this.onOpen(item.webUrl), "opened in browser");
+			if (item) this.runAction(() => this.onOpen(item), "opened in browser");
       return;
     }
     if (data === "r") {
@@ -135,18 +153,38 @@ export class DashboardOverlay implements Component {
     const title = `${this.theme.fg("accent", this.theme.bold("Forgejo Dashboard"))}  ${this.theme.fg("muted", `[${filter}]`)}`;
     const lines = [truncateToWidth(title, width), ""];
     if (this.items.length === 0) {
-      lines.push(this.theme.fg("muted", "No matching assigned issues, pull requests, reviews, CI failures, or notifications."));
+			lines.push(
+				this.theme.fg(
+					"muted",
+					"No matching assigned issues, pull requests, reviews, CI failures, or notifications.",
+				),
+			);
     } else {
       const maxRows = 12;
-      const start = Math.max(0, Math.min(this.selected - Math.floor(maxRows / 2), this.items.length - maxRows));
-      for (let index = start; index < Math.min(start + maxRows, this.items.length); index += 1) {
+			const start = Math.max(
+				0,
+				Math.min(
+					this.selected - Math.floor(maxRows / 2),
+					this.items.length - maxRows,
+				),
+			);
+			for (
+				let index = start;
+				index < Math.min(start + maxRows, this.items.length);
+				index += 1
+			) {
         const item = this.items[index];
         if (!item) continue;
         const selected = index === this.selected;
         const marker = selected ? "> " : "  ";
         const kind = item.kind === "authored-pull" ? "my-pr" : item.kind;
         const text = `${marker}[${kind}] ${itemReference(item)}  ${item.title}  ${formatRelativeAge(item.updatedAt)}`;
-        lines.push(truncateToWidth(selected ? this.theme.fg("accent", text) : text, width));
+				lines.push(
+					truncateToWidth(
+						selected ? this.theme.fg("accent", text) : text,
+						width,
+					),
+				);
       }
     }
     lines.push("");
@@ -160,8 +198,17 @@ export class DashboardOverlay implements Component {
         width,
       ),
     );
-    if (this.status) lines.push(truncateToWidth(this.theme.fg("warning", this.status), width));
-    lines.push(truncateToWidth(this.theme.fg("dim", "↑↓/jk navigate • tab filter • enter insert • o open • m read • r refresh • esc close"), width));
+		if (this.status)
+			lines.push(truncateToWidth(this.theme.fg("warning", this.status), width));
+		lines.push(
+			truncateToWidth(
+				this.theme.fg(
+					"dim",
+					"↑↓/jk navigate • tab filter • enter insert • o open • m read • r refresh • esc close",
+				),
+				width,
+			),
+		);
     return lines;
   }
 

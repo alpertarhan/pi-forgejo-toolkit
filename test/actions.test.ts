@@ -21,7 +21,13 @@ const SERVER = {
 };
 const REPO: RepoRef = { server: "work", owner: "acme", repo: "app" };
 
-function run(id: number, workflow: string, ref: string, status: ForgejoActionRun["status"], updated: string): ForgejoActionRun {
+function run(
+	id: number,
+	workflow: string,
+	ref: string,
+	status: ForgejoActionRun["status"],
+	updated: string,
+): ForgejoActionRun {
   return {
     id,
     title: `Run ${id}`,
@@ -56,7 +62,10 @@ describe("Forgejo Actions queries", () => {
       return new Response(
         JSON.stringify({
           total_count: 42,
-          workflow_runs: [run(8, "ci.yml", "main", "failure", "2026-08-12T10:00:00Z"), null],
+					workflow_runs: [
+						run(8, "ci.yml", "main", "failure", "2026-08-12T10:00:00Z"),
+						null,
+					],
         }),
         { status: 200, headers: { "content-type": "application/json" } },
       );
@@ -95,7 +104,9 @@ describe("Forgejo Actions queries", () => {
 
   it("uses an HTTP byte range for bounded plaintext job logs", async () => {
     const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
-      expect(String(input)).toBe("https://forgejo.example/api/v1/repos/acme/app/actions/jobs/19/logs?attempt=2");
+			expect(String(input)).toBe(
+				"https://forgejo.example/api/v1/repos/acme/app/actions/jobs/19/logs?attempt=2",
+			);
       const headers = new Headers(init?.headers);
       expect(headers.get("range")).toBe("bytes=0-3999");
       return new Response("bounded log", {
@@ -116,17 +127,22 @@ describe("Forgejo Actions queries", () => {
 
   it("dispatches exact workflow inputs and asks Forgejo to return the run", async () => {
     const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
-      expect(String(input)).toBe("https://forgejo.example/api/v1/repos/acme/app/actions/workflows/release.yml/dispatches");
+			expect(String(input)).toBe(
+				"https://forgejo.example/api/v1/repos/acme/app/actions/workflows/release.yml/dispatches",
+			);
       expect(init?.method).toBe("POST");
       expect(JSON.parse(String(init?.body))).toEqual({
         ref: "refs/heads/main",
         inputs: { channel: "stable", token: "sensitive-input" },
         return_run_info: true,
       });
-      return new Response(JSON.stringify({ id: 91, run_number: 7, jobs: ["publish"] }), {
+			return new Response(
+				JSON.stringify({ id: 91, run_number: 7, jobs: ["publish"] }),
+				{
         status: 201,
         headers: { "content-type": "application/json" },
-      });
+				},
+			);
     });
     const client = new ForgejoClient("work", SERVER, {
       environment: { FORGEJO_TOKEN: "secret" },
@@ -134,13 +150,10 @@ describe("Forgejo Actions queries", () => {
     });
 
     await expect(
-      dispatchActionWorkflow(
-        client,
-        REPO,
-        "release.yml",
-        "refs/heads/main",
-        { channel: "stable", token: "sensitive-input" },
-      ),
+			dispatchActionWorkflow(client, REPO, "release.yml", "refs/heads/main", {
+				channel: "stable",
+				token: "sensitive-input",
+			}),
     ).resolves.toEqual({ id: 91, run_number: 7, jobs: ["publish"] });
   });
 
@@ -170,14 +183,19 @@ describe("Forgejo Actions queries", () => {
     const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
       const url = new URL(String(input));
       if (url.pathname.endsWith("/runs/44/artifacts")) {
-        expect(Object.fromEntries(url.searchParams)).toEqual({ name: "coverage", page: "2", limit: "5" });
+				expect(Object.fromEntries(url.searchParams)).toEqual({
+					name: "coverage",
+					page: "2",
+					limit: "5",
+				});
         return new Response(
           JSON.stringify([
             {
               id: 6,
               name: "coverage",
               size_in_bytes: 800,
-              archive_download_url: "https://forgejo.example/api/v1/repos/acme/app/actions/artifacts/6/zip",
+							archive_download_url:
+								"https://forgejo.example/api/v1/repos/acme/app/actions/artifacts/6/zip",
               expired: false,
               run_id: 44,
               created_at: "2026-08-12T10:00:00Z",
@@ -185,23 +203,39 @@ describe("Forgejo Actions queries", () => {
               expires_at: "2026-08-19T10:00:00Z",
             },
           ]),
-          { headers: { "content-type": "application/json", "x-total-count": "9" } },
+					{
+						headers: {
+							"content-type": "application/json",
+							"x-total-count": "9",
+						},
+					},
         );
       }
-      expect(url.pathname).toBe("/api/v1/repos/acme/app/actions/artifacts/6/zip");
+			expect(url.pathname).toBe(
+				"/api/v1/repos/acme/app/actions/artifacts/6/zip",
+			);
       expect(new Headers(init?.headers).get("accept")).toBe("application/zip");
-      return new Response(archive, { headers: { "content-type": "application/zip" } });
+			return new Response(archive, {
+				headers: { "content-type": "application/zip" },
+			});
     });
     const client = new ForgejoClient("work", SERVER, {
       environment: { FORGEJO_TOKEN: "secret" },
       fetchImpl: fetchMock,
     });
 
-    const page = await listActionArtifacts(client, REPO, { runId: 44, name: "coverage", page: 2, limit: 5 });
+		const page = await listActionArtifacts(client, REPO, {
+			runId: 44,
+			name: "coverage",
+			page: 2,
+			limit: 5,
+		});
     const downloaded = await downloadActionArtifact(client, REPO, 6, 1_000);
 
     expect(page).toMatchObject({ total: 9, page: 2, limit: 5, runId: 44 });
     expect(page.artifacts.map((artifact) => artifact.id)).toEqual([6]);
-    expect([...downloaded]).toEqual([...archive]);
+		expect([
+			...new Uint8Array(await new Response(downloaded).arrayBuffer()),
+		]).toEqual([...archive]);
   });
 });

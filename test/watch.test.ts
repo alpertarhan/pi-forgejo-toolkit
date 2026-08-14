@@ -179,6 +179,23 @@ describe("WatchManager", () => {
 		expect(manager.list()[0]).toMatchObject({ state: "matched" });
 	});
 
+	it("advances a complete timeline only through the queried upper bound", async () => {
+		const { scanTimeline } = await import("../src/timeline.js");
+		const before = "2026-08-12T10:00:00.000Z";
+		const request = vi.fn(async () =>
+			result([], { date: "2026-08-12T10:00:20.000Z" }),
+		);
+		const scan = await scanTimeline(
+			{ request } as unknown as ForgejoClient,
+			"repos/acme/app/issues/9/timeline",
+			"2026-08-12T09:59:55.000Z",
+			before,
+			50,
+			1,
+		);
+		expect(scan).toMatchObject({ complete: true, fetchedThrough: before });
+	});
+
 	it("follows pagination metadata even when Forgejo clamps the requested limit", async () => {
 		const pageOne = Array.from({ length: 20 }, (_, index) => event(index + 1));
 		const pageTwo = [event(21)];
@@ -207,6 +224,21 @@ describe("WatchManager", () => {
 
 		expect(timelineCall).toBe(2);
 		manager.close();
+	});
+
+	it("does not let an unfiltered total count force an extra timeline page", async () => {
+		const { scanTimeline } = await import("../src/timeline.js");
+		const request = vi.fn(async () => result([event(1)], { total: 50_000 }));
+		const scan = await scanTimeline(
+			{ request } as unknown as ForgejoClient,
+			"repos/acme/app/issues/9/timeline",
+			"2026-08-12T09:59:55.000Z",
+			"2026-08-12T10:00:00.000Z",
+			50,
+			3,
+		);
+		expect(scan).toMatchObject({ complete: true, pages: 1, total: 50_000 });
+		expect(request).toHaveBeenCalledOnce();
 	});
 
 	it("normalizes agent notes and keeps only fixed-size timeline fingerprints", async () => {

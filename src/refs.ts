@@ -36,7 +36,12 @@ export function parseResourceRef(value: string): ResourceRef | undefined {
 	} catch {
 		return undefined;
 	}
-	const parts = url.pathname.split("/").filter(Boolean).map(decodeURIComponent);
+	let parts: string[];
+	try {
+		parts = url.pathname.split("/").filter(Boolean).map(decodeURIComponent);
+	} catch {
+		return undefined;
+	}
 	if (parts.length !== 4) return undefined;
 	const [owner, repo, rawKind, rawIndex] = parts;
 	if (!owner || !repo || !rawKind || !rawIndex || !/^\d+$/.test(rawIndex))

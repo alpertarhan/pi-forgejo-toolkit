@@ -1,4 +1,7 @@
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type {
+	ExtensionAPI,
+	ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
 import { describe, expect, it, vi } from "vitest";
 import type { ForgejoClient } from "../src/client.js";
 import type { ForgejoRuntime } from "../src/runtime.js";
@@ -28,11 +31,22 @@ function captureReviewTool(runtime: ForgejoRuntime): CapturedTool {
 }
 
 function fakeRuntime(heads: string[]) {
-  const ref: ResourceRef = { server: "work", owner: "acme", repo: "app", kind: "pull", index: 9 };
+	const ref: ResourceRef = {
+		server: "work",
+		owner: "acme",
+		repo: "app",
+		kind: "pull",
+		index: 9,
+	};
   const drafts = new Map<string, ReviewDraft>();
-  const request = vi.fn(async (_path: string, options?: { method?: string; body?: unknown }) => {
+	const request = vi.fn(
+		async (_path: string, options?: { method?: string; body?: unknown }) => {
     if (options?.method === "POST") {
-      return { data: { id: 77, state: "APPROVED" }, status: 200, headers: new Headers() };
+				return {
+					data: { id: 77, state: "APPROVED" },
+					status: 200,
+					headers: new Headers(),
+				};
     }
     const sha = heads.shift() ?? "same-sha";
     return {
@@ -49,18 +63,27 @@ function fakeRuntime(heads: string[]) {
       status: 200,
       headers: new Headers(),
     };
-  });
+		},
+	);
   const runtime = {
     resolveResource: () => ref,
-    client: () => ({ request } as unknown as ForgejoClient),
+		client: () => ({ request }) as unknown as ForgejoClient,
     draftKey: () => "work:acme/app!9",
     drafts,
-    dashboard: { refresh: vi.fn(async () => undefined), refreshIfObserved: vi.fn(async () => undefined) },
+		dashboard: {
+			refresh: vi.fn(async () => undefined),
+			refreshIfObserved: vi.fn(async () => undefined),
+		},
   } as unknown as ForgejoRuntime;
   return { runtime, request, drafts };
 }
 
-const target = { action: "create_draft", ref: "work:acme/app!9", verdict: "APPROVE", body: "Looks correct" };
+const target = {
+	action: "create_draft",
+	ref: "work:acme/app!9",
+	verdict: "APPROVE",
+	body: "Looks correct",
+};
 const signal = new AbortController().signal;
 
 describe("forgejo_review submission safety", () => {
@@ -69,13 +92,47 @@ describe("forgejo_review submission safety", () => {
     const tool = captureReviewTool(fixture.runtime);
     const noUi = { hasUI: false } as ExtensionContext;
     await tool.execute("create", target, signal, undefined, noUi);
-    await tool.execute("preview", { action: "preview", ref: "work:acme/app!9" }, signal, undefined, noUi);
+		await tool.execute(
+			"preview",
+			{ action: "preview", ref: "work:acme/app!9" },
+			signal,
+			undefined,
+			noUi,
+		);
     await expect(
-      tool.execute("submit", { action: "submit", ref: "work:acme/app!9" }, signal, undefined, noUi),
+			tool.execute(
+				"submit",
+				{ action: "submit", ref: "work:acme/app!9" },
+				signal,
+				undefined,
+				noUi,
+			),
     ).rejects.toThrow("requires interactive confirmation");
-    expect(fixture.request.mock.calls.some((call) => call[1]?.method === "POST")).toBe(false);
+		expect(
+			fixture.request.mock.calls.some((call) => call[1]?.method === "POST"),
+		).toBe(false);
     expect(fixture.drafts.has("work:acme/app!9")).toBe(true);
   });
+
+	it("requires replace=true before overwriting an existing draft", async () => {
+		const fixture = fakeRuntime(["head-sha", "head-sha"]);
+		const tool = captureReviewTool(fixture.runtime);
+		const noUi = { hasUI: false } as ExtensionContext;
+		await tool.execute("create", target, signal, undefined, noUi);
+		await expect(
+			tool.execute("replace", target, signal, undefined, noUi),
+		).rejects.toThrow("pass replace=true");
+		await expect(
+			tool.execute(
+				"replace",
+				{ ...target, replace: true, body: "Replacement" },
+				signal,
+				undefined,
+				noUi,
+			),
+		).resolves.toBeDefined();
+		expect(fixture.drafts.get("work:acme/app!9")?.body).toBe("Replacement");
+	});
 
   it("requires an explicit preview before submission", async () => {
     const fixture = fakeRuntime(["head-sha"]);
@@ -84,7 +141,13 @@ describe("forgejo_review submission safety", () => {
     const ui = { hasUI: true, ui: { confirm } } as unknown as ExtensionContext;
     await tool.execute("create", target, signal, undefined, ui);
     await expect(
-      tool.execute("submit", { action: "submit", ref: "work:acme/app!9" }, signal, undefined, ui),
+			tool.execute(
+				"submit",
+				{ action: "submit", ref: "work:acme/app!9" },
+				signal,
+				undefined,
+				ui,
+			),
     ).rejects.toThrow("must be previewed before submit");
     expect(confirm).not.toHaveBeenCalled();
     expect(fixture.request).toHaveBeenCalledOnce();
@@ -96,18 +159,32 @@ describe("forgejo_review submission safety", () => {
     const confirm = vi.fn(async () => true);
     const ui = { hasUI: true, ui: { confirm } } as unknown as ExtensionContext;
     await tool.execute("create", target, signal, undefined, ui);
-    await tool.execute("preview", { action: "preview", ref: "work:acme/app!9" }, signal, undefined, ui);
+		await tool.execute(
+			"preview",
+			{ action: "preview", ref: "work:acme/app!9" },
+			signal,
+			undefined,
+			ui,
+		);
     await expect(
-      tool.execute("submit", { action: "submit", ref: "work:acme/app!9" }, signal, undefined, ui),
+			tool.execute(
+				"submit",
+				{ action: "submit", ref: "work:acme/app!9" },
+				signal,
+				undefined,
+				ui,
+			),
     ).rejects.toThrow("pull request head changed from old-sha to new-sha");
     expect(confirm).not.toHaveBeenCalled();
-    expect(fixture.request.mock.calls.some((call) => call[1]?.method === "POST")).toBe(false);
+		expect(
+			fixture.request.mock.calls.some((call) => call[1]?.method === "POST"),
+		).toBe(false);
   });
 
   it("publishes the complete draft only after confirmation", async () => {
     const fixture = fakeRuntime(["head-sha", "head-sha"]);
     const tool = captureReviewTool(fixture.runtime);
-    const confirm = vi.fn(async () => true);
+		const confirm = vi.fn(async (_title: string, _message: string) => true);
     const ui = { hasUI: true, ui: { confirm } } as unknown as ExtensionContext;
     await tool.execute("create", target, signal, undefined, ui);
     await tool.execute(
@@ -123,14 +200,39 @@ describe("forgejo_review submission safety", () => {
       undefined,
       ui,
     );
-    await tool.execute("preview", { action: "preview", ref: "work:acme/app!9" }, signal, undefined, ui);
-    await tool.execute("submit", { action: "submit", ref: "work:acme/app!9" }, signal, undefined, ui);
-    const post = fixture.request.mock.calls.find((call) => call[1]?.method === "POST");
+		await tool.execute(
+			"preview",
+			{ action: "preview", ref: "work:acme/app!9" },
+			signal,
+			undefined,
+			ui,
+		);
+		await tool.execute(
+			"submit",
+			{ action: "submit", ref: "work:acme/app!9" },
+			signal,
+			undefined,
+			ui,
+		);
+		const post = fixture.request.mock.calls.find(
+			(call) => call[1]?.method === "POST",
+		);
     expect(confirm).toHaveBeenCalledOnce();
+		expect(confirm.mock.calls[0]?.[1]).toContain("Summary: Looks correct");
+		expect(confirm.mock.calls[0]?.[1]).toContain(
+			"src/auth.ts:new:42 This branch skips validation.",
+		);
     expect(post?.[1]?.body).toMatchObject({
       event: "APPROVE",
       commit_id: "head-sha",
-      comments: [{ path: "src/auth.ts", body: "This branch skips validation.", new_position: 42, old_position: 0 }],
+			comments: [
+				{
+					path: "src/auth.ts",
+					body: "This branch skips validation.",
+					new_position: 42,
+					old_position: 0,
+				},
+			],
     });
     expect(fixture.drafts.has("work:acme/app!9")).toBe(false);
   });

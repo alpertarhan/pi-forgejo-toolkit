@@ -150,5 +150,8 @@ describe("Forgejo references", () => {
 		expect(
 			parseResourceRef("fj://work/platform/api/pulls/9007199254740993"),
 		).toBeUndefined();
+		expect(
+			parseResourceRef("fj://work/%E0%A4%A/api/issues/12"),
+		).toBeUndefined();
 	});
 });

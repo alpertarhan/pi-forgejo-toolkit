@@ -1,7 +1,14 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
-import { boundModelText, DEFAULT_MODEL_OUTPUT_BYTES, modelOutputBytes, positiveLimit, toolResult, type RuntimeProvider } from "./common.js";
+import {
+	boundModelText,
+	DEFAULT_MODEL_OUTPUT_BYTES,
+	modelOutputBytes,
+	positiveLimit,
+	toolResult,
+	type RuntimeProvider,
+} from "./common.js";
 
 const SEARCH_PREVIEW_BYTES = 240;
 
@@ -12,10 +19,15 @@ function searchPreview(value: string): { text: string; truncated: boolean } {
 }
 
 function record(value: unknown): Record<string, unknown> | undefined {
-  return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : undefined;
+	return typeof value === "object" && value !== null
+		? (value as Record<string, unknown>)
+		: undefined;
 }
 
-function stringField(value: Record<string, unknown>, key: string): string | undefined {
+function stringField(
+	value: Record<string, unknown>,
+	key: string,
+): string | undefined {
   return typeof value[key] === "string" ? value[key] : undefined;
 }
 
@@ -24,7 +36,11 @@ function repositoryName(value: Record<string, unknown>): string | undefined {
   return repository ? stringField(repository, "full_name") : undefined;
 }
 
-function formatSearchItem(server: string, action: "issues" | "pulls" | "repositories" | "users", value: unknown): string {
+function formatSearchItem(
+	server: string,
+	action: "issues" | "pulls" | "repositories" | "users",
+	value: unknown,
+): string {
   const item = record(value);
   if (!item) return String(value);
   if (action === "issues" || action === "pulls") {
@@ -39,19 +55,26 @@ function formatSearchItem(server: string, action: "issues" | "pulls" | "reposito
     const body = stringField(item, "body");
     if (body) {
       const preview = searchPreview(body);
-      if (preview.text) lines.push(`Body preview${preview.truncated ? " (truncated)" : ""}: ${preview.text}`);
+			if (preview.text)
+				lines.push(
+					`Body preview${preview.truncated ? " (truncated)" : ""}: ${preview.text}`,
+				);
     }
     const webUrl = stringField(item, "html_url");
     if (webUrl) lines.push(`URL: ${webUrl}`);
     return lines.join("\n");
   }
   if (action === "repositories") {
-    const fullName = stringField(item, "full_name") ?? stringField(item, "name") ?? "unknown";
+		const fullName =
+			stringField(item, "full_name") ?? stringField(item, "name") ?? "unknown";
     const lines = [`${server}:${fullName}`];
     const description = stringField(item, "description");
     if (description) {
       const preview = searchPreview(description);
-      if (preview.text) lines.push(`Description${preview.truncated ? " (truncated)" : ""}: ${preview.text}`);
+			if (preview.text)
+				lines.push(
+					`Description${preview.truncated ? " (truncated)" : ""}: ${preview.text}`,
+				);
     }
     const webUrl = stringField(item, "html_url");
     if (webUrl) lines.push(`URL: ${webUrl}`);
@@ -66,12 +89,15 @@ function formatSearchItem(server: string, action: "issues" | "pulls" | "reposito
   return lines.join("\n");
 }
 
-
-export function registerSearchTool(pi: ExtensionAPI, runtimeProvider: RuntimeProvider): void {
+export function registerSearchTool(
+	pi: ExtensionAPI,
+	runtimeProvider: RuntimeProvider,
+): void {
   pi.registerTool({
     name: "forgejo_search",
     label: "Forgejo Search",
-    description: "Search server-qualified issues, pull requests, repositories, or users across Forgejo servers.",
+		description:
+			"Search server-qualified issues, pull requests, repositories, or users across Forgejo servers.",
     parameters: Type.Object({
       action: StringEnum(["issues", "pulls", "repositories", "users"] as const),
       query: Type.String({ minLength: 1 }),
@@ -83,39 +109,79 @@ export function registerSearchTool(pi: ExtensionAPI, runtimeProvider: RuntimePro
     }),
     async execute(_toolCallId, params, signal) {
       const runtime = runtimeProvider();
-      const aliases = params.server ? [params.server] : runtime.clients.aliases();
+			const aliases = params.server
+				? [params.server]
+				: runtime.clients.aliases();
       for (const alias of aliases) runtime.client(alias);
       const limit = positiveLimit(params.limit, 20);
       const requestOptions = signal === undefined ? {} : { signal };
-      const results: Array<{ server: string; total: number; items: unknown[] }> = [];
+			const results: Array<{
+				server: string;
+				total: number;
+				items: unknown[];
+			}> = [];
       const errors: Record<string, string> = {};
 
       await Promise.all(
         aliases.map(async (alias) => {
           const client = runtime.client(alias);
           try {
-            const path = params.action === "repositories" ? "repos/search" : params.action === "users" ? "users/search" : "repos/issues/search";
+						const path =
+							params.action === "repositories"
+								? "repos/search"
+								: params.action === "users"
+									? "users/search"
+									: "repos/issues/search";
             const query =
               params.action === "issues" || params.action === "pulls"
-                ? { q: params.query, state: params.state ?? "open", type: params.action, page: params.page ?? 1, limit }
+								? {
+										q: params.query,
+										state: params.state ?? "open",
+										type: params.action,
+										page: params.page ?? 1,
+										limit,
+									}
                 : { q: params.query, page: params.page ?? 1, limit };
-            const response = await client.request<unknown[] | { data?: unknown[]; ok?: boolean }>(path, {
+						const response = await client.request<
+							unknown[] | { data?: unknown[]; ok?: boolean }
+						>(path, {
               ...requestOptions,
               query,
             });
-            const items = Array.isArray(response.data) ? response.data : (response.data.data ?? []);
-            results.push({ server: alias, total: response.totalCount ?? items.length, items });
+						const items = Array.isArray(response.data)
+							? response.data
+							: (response.data.data ?? []);
+						results.push({
+							server: alias,
+							total: response.totalCount ?? items.length,
+							items,
+						});
           } catch (error) {
-            errors[alias] = error instanceof Error ? error.message : String(error);
+						errors[alias] =
+							error instanceof Error ? error.message : String(error);
           }
+					return undefined;
         }),
       );
 
-      const summaryParts = results.map((result) => `${result.server}: ${result.total}`);
-      for (const alias of Object.keys(errors)) summaryParts.push(`${alias}: error`);
-      const entries = results.flatMap((result) => result.items.map((item) => formatSearchItem(result.server, params.action, item)));
-      const text = [`${params.action} search '${params.query}' | ${summaryParts.join(" | ")}`, ...entries].join("\n\n");
-      const bounded = boundModelText(text, params.max_bytes ?? DEFAULT_MODEL_OUTPUT_BYTES);
+			const summaryParts = results.map(
+				(result) => `${result.server}: ${result.total}`,
+			);
+			for (const alias of Object.keys(errors))
+				summaryParts.push(`${alias}: error`);
+			const entries = results.flatMap((result) =>
+				result.items.map((item) =>
+					formatSearchItem(result.server, params.action, item),
+				),
+			);
+			const text = [
+				`${params.action} search '${params.query}' | ${summaryParts.join(" | ")}`,
+				...entries,
+			].join("\n\n");
+			const bounded = boundModelText(
+				text,
+				params.max_bytes ?? DEFAULT_MODEL_OUTPUT_BYTES,
+			);
       return toolResult(bounded.text, {
         results,
         errors,
