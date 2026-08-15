@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-08-15
+
+### Changed
+
+- Repository resolution now reports an explicit reason when Git remotes point at GitHub, GitLab, or Bitbucket instead of a configured Forgejo server, directing agents to the `gh` CLI or plain git instead of leaving the failure generic.
+- Server configuration rejects known non-Forgejo hosts up front with a clear configuration error, preventing partially compatible GitHub/GitLab API setups that fail in confusing ways.
+
 ## [0.4.0] - 2026-08-14
 
 ### Added

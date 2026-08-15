@@ -1,6 +1,6 @@
 {
   "name": "pi-forgejo-toolkit",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Multi-server Forgejo workflows, dashboard, reviews, and Actions tools for Pi",
   "type": "module",
   "author": {

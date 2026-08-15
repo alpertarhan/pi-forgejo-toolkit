@@ -29,16 +29,16 @@ describe("Git remote resolution", () => {
         "origin\tgit@forgejo-work:platform/api.git (fetch)\norigin\tgit@forgejo-work:platform/api.git (push)\n",
       ),
     ).toEqual([
-			{
-				name: "origin",
-				url: "git@forgejo-work:platform/api.git",
-				direction: "fetch",
-			},
-			{
-				name: "origin",
-				url: "git@forgejo-work:platform/api.git",
-				direction: "push",
-			},
+      {
+        name: "origin",
+        url: "git@forgejo-work:platform/api.git",
+        direction: "fetch",
+      },
+      {
+        name: "origin",
+        url: "git@forgejo-work:platform/api.git",
+        direction: "push",
+      },
     ]);
   });
 
@@ -75,20 +75,20 @@ describe("Git remote resolution", () => {
     ]);
   });
 
-	it("ignores malformed escapes and HTTPS remotes outside the configured base path", () => {
-		const remotes = parseGitRemotes(
-			[
-				"bad https://forgejo.work.example/git/%E0%A4%A/api.git (fetch)",
-				"outside https://forgejo.work.example/other/platform/api.git (fetch)",
-			].join("\n"),
-		);
-		expect(matchForgejoRemotes(remotes, config)).toEqual([]);
-	});
+  it("ignores malformed escapes and HTTPS remotes outside the configured base path", () => {
+    const remotes = parseGitRemotes(
+      [
+        "bad https://forgejo.work.example/git/%E0%A4%A/api.git (fetch)",
+        "outside https://forgejo.work.example/other/platform/api.git (fetch)",
+      ].join("\n"),
+    );
+    expect(matchForgejoRemotes(remotes, config)).toEqual([]);
+  });
 
   it("resolves SSH config aliases without opening a connection", async () => {
-		const remotes = parseGitRemotes(
-			"origin git@work-alias:platform/api.git (fetch)",
-		);
+    const remotes = parseGitRemotes(
+      "origin git@work-alias:platform/api.git (fetch)",
+    );
     const exec = vi.fn(async () => ({
       code: 0,
       stdout: "host work-alias\nhostname forgejo.work.example\nport 2222\n",
@@ -122,13 +122,25 @@ describe("Git remote resolution", () => {
     });
   });
 
+  it("directs non-Forgejo remotes to the gh CLI", () => {
+    const remotes = parseGitRemotes(
+      "origin https://github.com/acme/widgets.git (fetch)",
+    );
+    const resolution = resolveRepoFromRemotes(remotes, config);
+    expect(resolution).toEqual({
+      status: "none",
+      reason:
+        "git remote is hosted on github.com, which is not Forgejo; use the 'gh' CLI or plain git instead of Forgejo tools",
+    });
+  });
+
   it("refuses to silently choose between two Forgejo repositories", () => {
     const remotes = parseGitRemotes(
       "origin git@forgejo-work:platform/api.git (fetch)\nmirror git@forgejo-community:platform/api.git (fetch)",
     );
     const resolution = resolveRepoFromRemotes(remotes, config);
     expect(resolution.status).toBe("ambiguous");
-		if (resolution.status === "ambiguous")
-			expect(resolution.matches).toHaveLength(2);
+    if (resolution.status === "ambiguous")
+      expect(resolution.matches).toHaveLength(2);
   });
 });

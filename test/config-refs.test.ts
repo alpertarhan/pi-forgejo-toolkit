@@ -83,6 +83,19 @@ describe("Forgejo configuration", () => {
 		).toThrow(ConfigError);
 	});
 
+	it("rejects known non-Forgejo hosts as servers", () => {
+		expect(() =>
+			parseConfig({
+				servers: {
+					work: {
+						baseUrl: "https://github.com",
+						tokenEnv: "GITHUB_TOKEN",
+					},
+				},
+			}),
+		).toThrow("github.com is not a Forgejo server");
+	});
+
 	it("rejects credential fields belonging to another provider", () => {
 		expect(() =>
 			parseConfig({
@@ -150,8 +163,6 @@ describe("Forgejo references", () => {
 		expect(
 			parseResourceRef("fj://work/platform/api/pulls/9007199254740993"),
 		).toBeUndefined();
-		expect(
-			parseResourceRef("fj://work/%E0%A4%A/api/issues/12"),
-		).toBeUndefined();
+		expect(parseResourceRef("fj://work/%E0%A4%A/api/issues/12")).toBeUndefined();
 	});
 });
