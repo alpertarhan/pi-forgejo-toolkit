@@ -196,6 +196,30 @@ describe("WatchManager", () => {
 		expect(scan).toMatchObject({ complete: true, fetchedThrough: before });
 	});
 
+	it("treats a null timeline body (Forgejo empty since/before window) as no events", async () => {
+		const { scanTimeline } = await import("../src/timeline.js");
+		const before = "2026-08-12T10:00:00.000Z";
+		const request = vi.fn(async () =>
+			result(null as unknown as ForgejoTimelineEvent[], {
+				date: "2026-08-12T10:00:20.000Z",
+			}),
+		);
+		const scan = await scanTimeline(
+			{ request } as unknown as ForgejoClient,
+			"repos/acme/app/issues/9/timeline",
+			"2026-08-12T09:59:55.000Z",
+			before,
+			50,
+			1,
+		);
+		expect(scan).toMatchObject({
+			complete: true,
+			fetchedThrough: before,
+			events: [],
+			pages: 1,
+		});
+	});
+
 	it("follows pagination metadata even when Forgejo clamps the requested limit", async () => {
 		const pageOne = Array.from({ length: 20 }, (_, index) => event(index + 1));
 		const pageTwo = [event(21)];

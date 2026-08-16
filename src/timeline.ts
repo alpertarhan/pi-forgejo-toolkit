@@ -88,9 +88,11 @@ export async function scanTimeline(
 		});
 		pages = page;
 		if (response.totalCount !== undefined) total = response.totalCount;
-		for (const event of response.data) byId.set(event.id, event);
+		// Forgejo marshals an empty timeline as JSON null (Go nil slice), not []
+		const pageEvents = response.data ?? [];
+		for (const event of pageEvents) byId.set(event.id, event);
 		const hasMore =
-			hasNextPage(response.headers) || response.data.length === pageLimit;
+			hasNextPage(response.headers) || pageEvents.length === pageLimit;
 		if (hasMore) continue;
 		complete = true;
 		break;
