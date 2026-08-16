@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- `forgejo_watch` start no longer fails with `response.data is not iterable`: Forgejo marshals an empty timeline window (Go nil slice) as JSON `null`, which the timeline scan now treats as no events (#6).
+
 ## [0.4.1] - 2026-08-15
 
 ### Changed
