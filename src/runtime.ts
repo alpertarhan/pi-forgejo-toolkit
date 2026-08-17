@@ -1,17 +1,18 @@
 import { CapabilityRegistry } from "./capabilities.js";
 import { ForgejoClient, ForgejoClientPool } from "./client.js";
-import { loadConfig } from "./config.js";
+import { configPaths, loadConfig } from "./config.js";
 import { createCredentialProvider } from "./credentials.js";
+import type { MutationApprovalKey } from "./mutation-approvals.js";
 import { DashboardStore } from "./dashboard/store.js";
 import { parseResourceRef } from "./refs.js";
 import { resolveRepository } from "./remote-resolver.js";
 import type { CommandExecutor } from "./process.js";
 import type {
-	ForgejoConfig,
-	RepoRef,
-	RepoResolution,
-	ResourceRef,
-	ReviewDraft,
+  ForgejoConfig,
+  RepoRef,
+  RepoResolution,
+  ResourceRef,
+  ReviewDraft,
 } from "./types.js";
 
 export interface RepoInput {
@@ -37,6 +38,7 @@ export interface ConversationCursor {
 
 export class ForgejoRuntime {
   readonly drafts = new Map<string, ReviewDraft>();
+  readonly sessionMutationApprovals = new Set<MutationApprovalKey>();
   private readonly conversationCursors = new Map<string, ConversationCursor>();
   private selectedRepo: RepoRef | undefined;
   private selectedServer: string | undefined;
@@ -48,6 +50,7 @@ export class ForgejoRuntime {
     readonly capabilities: CapabilityRegistry,
     readonly dashboard: DashboardStore,
     readonly repoResolution: RepoResolution,
+    readonly globalConfigPath: string = configPaths(cwd, process.env).global,
   ) {
     if (repoResolution.status === "resolved") {
       this.selectedRepo = repoResolution.repo;
@@ -69,19 +72,19 @@ export class ForgejoRuntime {
     this.clients.get(alias);
     this.selectedServer = alias;
     let repo: RepoRef | undefined;
-		if (
-			this.repoResolution.status === "resolved" &&
-			this.repoResolution.repo.server === alias
-		) {
+    if (
+      this.repoResolution.status === "resolved" &&
+      this.repoResolution.repo.server === alias
+    ) {
       repo = this.repoResolution.repo;
     } else if (this.repoResolution.status === "ambiguous") {
-			const matches = this.repoResolution.matches.filter(
-				(match) => match.server === alias,
-			);
+      const matches = this.repoResolution.matches.filter(
+        (match) => match.server === alias,
+      );
       if (matches.length === 1) {
         const match = matches[0];
-				if (match)
-					repo = { server: match.server, owner: match.owner, repo: match.repo };
+        if (match)
+          repo = { server: match.server, owner: match.owner, repo: match.repo };
       }
     }
     this.selectedRepo = repo;
@@ -90,22 +93,22 @@ export class ForgejoRuntime {
   }
 
   resolveRepo(input: RepoInput): RepoRef {
-		const explicit = [input.server, input.owner, input.repo].filter(
-			(value) => value !== undefined,
-		);
-		if (input.ref && explicit.length > 0) {
-			throw new Error("ref cannot be combined with server, owner, or repo");
-		}
+    const explicit = [input.server, input.owner, input.repo].filter(
+      (value) => value !== undefined,
+    );
+    if (input.ref && explicit.length > 0) {
+      throw new Error("ref cannot be combined with server, owner, or repo");
+    }
     if (input.ref) {
       const resource = parseResourceRef(input.ref);
-			if (!resource)
-				throw new Error(`invalid Forgejo reference '${input.ref}'`);
+      if (!resource)
+        throw new Error(`invalid Forgejo reference '${input.ref}'`);
       this.clients.get(resource.server);
-			return {
-				server: resource.server,
-				owner: resource.owner,
-				repo: resource.repo,
-			};
+      return {
+        server: resource.server,
+        owner: resource.owner,
+        repo: resource.repo,
+      };
     }
     if (explicit.length > 0 && explicit.length < 3) {
       throw new Error("server, owner, and repo must be supplied together");
@@ -123,22 +126,22 @@ export class ForgejoRuntime {
   }
 
   resolveResource(input: ResourceInput, kind: "issue" | "pull"): ResourceRef {
-		if (
-			input.ref &&
-			[input.server, input.owner, input.repo, input.index].some(
-				(value) => value !== undefined,
-			)
-		) {
-			throw new Error(
-				"ref cannot be combined with server, owner, repo, or index",
-			);
-		}
+    if (
+      input.ref &&
+      [input.server, input.owner, input.repo, input.index].some(
+        (value) => value !== undefined,
+      )
+    ) {
+      throw new Error(
+        "ref cannot be combined with server, owner, repo, or index",
+      );
+    }
     if (input.ref) {
       const resource = parseResourceRef(input.ref);
-			if (!resource)
-				throw new Error(`invalid Forgejo reference '${input.ref}'`);
-			if (resource.kind !== kind)
-				throw new Error(`reference '${input.ref}' is not a ${kind}`);
+      if (!resource)
+        throw new Error(`invalid Forgejo reference '${input.ref}'`);
+      if (resource.kind !== kind)
+        throw new Error(`reference '${input.ref}' is not a ${kind}`);
       this.clients.get(resource.server);
       return resource;
     }
@@ -181,49 +184,50 @@ export async function createRuntime(
   exec: CommandExecutor,
   environment: NodeJS.ProcessEnv = process.env,
   fetchImpl: typeof fetch = fetch,
-	projectTrusted = false,
+  projectTrusted = false,
 ): Promise<ForgejoRuntime> {
-	const config = await loadConfig(cwd, environment, { projectTrusted });
+  const config = await loadConfig(cwd, environment, { projectTrusted });
   const clients = new ForgejoClientPool(
     Object.fromEntries(
       Object.entries(config.servers).map(([alias, server]) => {
-				const credentialProvider = createCredentialProvider(
-					alias,
-					server,
-					cwd,
-					exec,
-					environment,
-				);
-				return [
-					alias,
-					new ForgejoClient(alias, server, { credentialProvider, fetchImpl }),
-				];
+        const credentialProvider = createCredentialProvider(
+          alias,
+          server,
+          cwd,
+          exec,
+          environment,
+        );
+        return [
+          alias,
+          new ForgejoClient(alias, server, { credentialProvider, fetchImpl }),
+        ];
       }),
     ),
   );
   const capabilities = new CapabilityRegistry(clients);
-	const resolution: RepoResolution = projectTrusted
-		? await resolveRepository(exec, cwd, config)
-		: {
-				status: "none",
-				reason:
-					"project-local Forgejo discovery is disabled until the project is trusted",
-			};
-	const activeRepo =
-		resolution.status === "resolved" ? resolution.repo : undefined;
-	const dashboard = new DashboardStore(
-		clients,
-		config.dashboard.previewLimit,
-		activeRepo,
-		(alias) => capabilities.get(alias)?.user,
-		(alias) => capabilities.get(alias)?.features.actionsRuns ?? "unknown",
-	);
-	return new ForgejoRuntime(
-		cwd,
-		config,
-		clients,
-		capabilities,
-		dashboard,
-		resolution,
-	);
+  const resolution: RepoResolution = projectTrusted
+    ? await resolveRepository(exec, cwd, config)
+    : {
+        status: "none",
+        reason:
+          "project-local Forgejo discovery is disabled until the project is trusted",
+      };
+  const activeRepo =
+    resolution.status === "resolved" ? resolution.repo : undefined;
+  const dashboard = new DashboardStore(
+    clients,
+    config.dashboard.previewLimit,
+    activeRepo,
+    (alias) => capabilities.get(alias)?.user,
+    (alias) => capabilities.get(alias)?.features.actionsRuns ?? "unknown",
+  );
+  return new ForgejoRuntime(
+    cwd,
+    config,
+    clients,
+    capabilities,
+    dashboard,
+    resolution,
+    configPaths(cwd, environment).global,
+  );
 }

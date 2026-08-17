@@ -1,9 +1,11 @@
-import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
-import { basename, dirname, resolve } from "node:path";
 import type { ExtensionUIContext } from "@earendil-works/pi-coding-agent";
 import { configPaths, parseConfig } from "./config.js";
+import {
+	readConfigTextIfPresent,
+	writeForgejoConfigAtomic,
+} from "./config-storage.js";
 import { discoverFgjInstances, suggestServerAlias } from "./fgj.js";
+import type { MutationApprovalKey } from "./mutation-approvals.js";
 import type { CommandExecutor } from "./process.js";
 import type {
 	DashboardConfig,
@@ -37,6 +39,7 @@ export interface ForgejoSetupResult {
 interface SetupDraft {
 	servers: Record<string, ForgejoServerConfig>;
 	dashboard: DashboardConfig;
+	allowedMutations: MutationApprovalKey[];
 }
 
 interface PreparedDraft {
@@ -48,7 +51,7 @@ const SCOPE_GLOBAL = "Global — use this configuration in every project";
 const SCOPE_PROJECT =
 	"Project — use this configuration only in the current project";
 const UPDATE_EXISTING =
-	"Update existing configuration — keep current servers and dashboard settings";
+	"Update existing configuration — keep current recognized settings";
 const REPLACE_EXISTING =
 	"Replace existing configuration — start from a clean setup";
 const DISCOVER_FGJ = "Discover servers already signed in with fgj";
@@ -78,20 +81,19 @@ function errorMessage(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
 }
 
-async function readTextIfPresent(path: string): Promise<string | undefined> {
-	try {
-		return await readFile(path, "utf8");
-	} catch (error) {
-		if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
-		throw error;
-	}
-}
-
 function emptyDraft(): SetupDraft {
-	return { servers: {}, dashboard: { ...DEFAULT_DASHBOARD } };
+	return {
+		servers: {},
+		dashboard: { ...DEFAULT_DASHBOARD },
+		allowedMutations: [],
+	};
 }
 
-function parseExistingDraft(text: string, target: string): SetupDraft {
+function parseExistingDraft(
+	text: string,
+	target: string,
+	preserveAllowedMutations: boolean,
+): SetupDraft {
 	let value: unknown;
 	try {
 		value = JSON.parse(text) as unknown;
@@ -106,10 +108,14 @@ function parseExistingDraft(text: string, target: string): SetupDraft {
 	const parsed = parseConfig({
 		servers: aliases.length > 0 ? rawServers : { setup: PLACEHOLDER_SERVER },
 		dashboard: value.dashboard,
+		allowedMutations: preserveAllowedMutations
+			? value.allowedMutations
+			: undefined,
 	});
 	return {
 		servers: aliases.length > 0 ? { ...parsed.servers } : {},
 		dashboard: { ...parsed.dashboard },
+		allowedMutations: [...(parsed.allowedMutations ?? [])],
 	};
 }
 
@@ -133,6 +139,7 @@ async function prepareDraft(
 	ui: SetupUI,
 	target: string,
 	originalText: string | undefined,
+	preserveAllowedMutations: boolean,
 ): Promise<PreparedDraft | undefined> {
 	if (originalText === undefined)
 		return { draft: emptyDraft(), keptExisting: false };
@@ -140,7 +147,7 @@ async function prepareDraft(
 	let existing: SetupDraft | undefined;
 	let invalidReason: string | undefined;
 	try {
-		existing = parseExistingDraft(originalText, target);
+		existing = parseExistingDraft(originalText, target, preserveAllowedMutations);
 	} catch (error) {
 		invalidReason = errorMessage(error);
 	}
@@ -257,9 +264,7 @@ function automaticRemoteHosts(server: ForgejoServerConfig): Set<string> {
 
 function extraRemoteHosts(server: ForgejoServerConfig): string[] {
 	const automatic = automaticRemoteHosts(server);
-	return server.remoteHosts.filter(
-		(host) => !automatic.has(host.toLowerCase()),
-	);
+	return server.remoteHosts.filter((host) => !automatic.has(host.toLowerCase()));
 }
 
 async function promptRemoteHosts(
@@ -775,9 +780,7 @@ async function customDashboard(
 		[important, notificationsOff, notificationsAll, "Back"],
 	);
 	if (
-		![important, notificationsOff, notificationsAll].includes(
-			notifications ?? "",
-		)
+		![important, notificationsOff, notificationsAll].includes(notifications ?? "")
 	)
 		return undefined;
 
@@ -902,46 +905,15 @@ function setupSummary(
 		...servers,
 		"",
 		`Dashboard: ${dashboardSummary(draft.dashboard)}`,
+		...(draft.allowedMutations.length > 0
+			? [`Saved mutation approvals: ${draft.allowedMutations.length}`]
+			: []),
 		"",
 		"Security: token values are never written; only environment variable names are saved.",
 	].join("\n");
 }
 
-async function removeIfPresent(path: string): Promise<void> {
-	try {
-		await unlink(path);
-	} catch (error) {
-		if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-	}
-}
-
-export async function writeForgejoConfigAtomic(
-	target: string,
-	config: ForgejoConfig,
-	expectedOriginal: string | undefined,
-): Promise<void> {
-	const current = await readTextIfPresent(target);
-	if (current !== expectedOriginal) {
-		throw new Error(
-			`Forgejo config changed while setup was open: ${target}. Run /fj-setup again to avoid overwriting it.`,
-		);
-	}
-	await mkdir(dirname(target), { recursive: true, mode: 0o700 });
-	const temporary = resolve(
-		dirname(target),
-		`.${basename(target)}.${randomUUID()}.tmp`,
-	);
-	await writeFile(temporary, `${JSON.stringify(config, null, 2)}\n`, {
-		encoding: "utf8",
-		flag: "wx",
-		mode: 0o600,
-	});
-	try {
-		await rename(temporary, target);
-	} finally {
-		await removeIfPresent(temporary);
-	}
-}
+export { writeForgejoConfigAtomic } from "./config-storage.js";
 
 export async function runForgejoSetup(
 	options: ForgejoSetupOptions,
@@ -953,8 +925,13 @@ export async function runForgejoSetup(
 	if (!scope) return undefined;
 	const paths = configPaths(cwd, environment);
 	const target = scope === "project" ? paths.project : paths.global;
-	const originalText = await readTextIfPresent(target);
-	const prepared = await prepareDraft(ui, target, originalText);
+	const originalText = await readConfigTextIfPresent(target);
+	const prepared = await prepareDraft(
+		ui,
+		target,
+		originalText,
+		scope === "global",
+	);
 	if (!prepared) return undefined;
 	const draft = prepared.draft;
 
@@ -998,6 +975,9 @@ export async function runForgejoSetup(
 			const validated = parseConfig({
 				servers: draft.servers,
 				dashboard: draft.dashboard,
+				...(scope === "global" && draft.allowedMutations.length > 0
+					? { allowedMutations: draft.allowedMutations }
+					: {}),
 			});
 			await writeForgejoConfigAtomic(target, validated, originalText);
 			return { scope, target, config: validated };

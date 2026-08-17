@@ -1,3 +1,5 @@
+import type { MutationApprovalKey } from "./mutation-approvals.js";
+
 export type ServerAlias = string;
 
 export type CredentialProviderKind = "env" | "fgj";
@@ -27,6 +29,8 @@ export interface DashboardConfig {
 export interface ForgejoConfig {
   servers: Record<ServerAlias, ForgejoServerConfig>;
   dashboard: DashboardConfig;
+  /** Stable mutation keys approved for automatic execution (global config only). */
+  allowedMutations?: readonly MutationApprovalKey[];
 }
 
 export interface RepoRef {
@@ -324,12 +328,12 @@ export interface ForgejoWorkflowDispatchRun {
 }
 
 export type ForgejoCommitStatusState =
-	| "pending"
-	| "success"
-	| "error"
-	| "failure"
-	| "warning"
-	| "skipped";
+  | "pending"
+  | "success"
+  | "error"
+  | "failure"
+  | "warning"
+  | "skipped";
 
 export interface ForgejoCommitStatus {
   id: number;
@@ -352,13 +356,13 @@ export interface ForgejoPullReview {
   id: number;
   user?: ForgejoUser;
   team?: ForgejoTeam;
-	state:
-		| "PENDING"
-		| "APPROVED"
-		| "REQUEST_CHANGES"
-		| "COMMENT"
-		| "REQUEST_REVIEW"
-		| string;
+  state:
+    | "PENDING"
+    | "APPROVED"
+    | "REQUEST_CHANGES"
+    | "COMMENT"
+    | "REQUEST_REVIEW"
+    | string;
   body?: string;
   official?: boolean;
   stale?: boolean;
@@ -433,16 +437,16 @@ export interface ApiResult<T> {
   status: number;
   headers: Headers;
   totalCount?: number;
-	truncated?: boolean;
+  truncated?: boolean;
 }
 
 export type ServerHealth = "loading" | "ready" | "auth-error" | "error";
 export type DashboardItemKind =
-	| "assigned"
-	| "authored-pull"
-	| "review"
-	| "notification"
-	| "ci-failed";
+  | "assigned"
+  | "authored-pull"
+  | "review"
+  | "notification"
+  | "ci-failed";
 
 export interface DashboardItem {
   key: string;
@@ -488,7 +492,7 @@ export interface DashboardTotals {
 
 export interface DashboardSnapshot {
   fetchedAt?: string;
-	backgroundError?: string;
+  backgroundError?: string;
   activeRepo?: RepoRef;
   servers: Record<ServerAlias, ServerDashboard>;
   totals: DashboardTotals;
@@ -497,9 +501,9 @@ export interface DashboardSnapshot {
 }
 
 export type ForgejoFeatureAvailability =
-	| "unknown"
-	| "available"
-	| "unavailable";
+  | "unknown"
+  | "available"
+  | "unavailable";
 
 export interface ForgejoCapabilities {
   server: ServerAlias;

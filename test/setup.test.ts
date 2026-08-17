@@ -25,10 +25,14 @@ interface ScriptedUi {
 function scriptedUi(script: ScriptStep[]): ScriptedUi {
   const remaining = [...script];
   const notify = vi.fn();
-  const take = <T extends ScriptStep["kind"]>(kind: T): Extract<ScriptStep, { kind: T }> => {
+  const take = <T extends ScriptStep["kind"]>(
+    kind: T,
+  ): Extract<ScriptStep, { kind: T }> => {
     const step = remaining.shift();
     if (!step || step.kind !== kind) {
-      throw new Error(`expected scripted ${kind}, received ${step?.kind ?? "end of script"}`);
+      throw new Error(
+        `expected scripted ${kind}, received ${step?.kind ?? "end of script"}`,
+      );
     }
     return step as Extract<ScriptStep, { kind: T }>;
   };
@@ -36,8 +40,13 @@ function scriptedUi(script: ScriptStep[]): ScriptedUi {
     select: vi.fn(async (_title: string, options: string[]) => {
       const step = take("select");
       if (step.match === undefined) return undefined;
-      const selected = options.find((option) => option.includes(step.match ?? ""));
-      if (!selected) throw new Error(`no option matching '${step.match}' in: ${options.join(" | ")}`);
+      const selected = options.find((option) =>
+        option.includes(step.match ?? ""),
+      );
+      if (!selected)
+        throw new Error(
+          `no option matching '${step.match}' in: ${options.join(" | ")}`,
+        );
       return selected;
     }),
     input: vi.fn(async () => take("input").value),
@@ -62,7 +71,11 @@ async function temporaryRoot(): Promise<string> {
 }
 
 afterEach(async () => {
-  await Promise.all(temporaryRoots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+  await Promise.all(
+    temporaryRoots
+      .splice(0)
+      .map((root) => rm(root, { recursive: true, force: true })),
+  );
 });
 
 describe("guided Forgejo setup", () => {
@@ -125,8 +138,12 @@ describe("guided Forgejo setup", () => {
     expect(written).not.toContain("token-value");
     expect((await stat(target)).mode & 0o777).toBe(0o600);
     expect(exec).not.toHaveBeenCalled();
-    expect(scripted.notify.mock.calls.flat().join(" ")).toContain("Alias must contain lowercase letters");
-    expect(scripted.notify.mock.calls.flat().join(" ")).toContain("Environment variable must begin");
+    expect(scripted.notify.mock.calls.flat().join(" ")).toContain(
+      "Alias must contain lowercase letters",
+    );
+    expect(scripted.notify.mock.calls.flat().join(" ")).toContain(
+      "Environment variable must begin",
+    );
     expect(stages).toEqual(["scope", "servers", "dashboard", "review"]);
     scripted.assertComplete();
   });
@@ -148,21 +165,39 @@ describe("guided Forgejo setup", () => {
     ]);
     const exec = vi.fn<CommandExecutor>(async () => ({
       code: 0,
-      stdout: "Authenticated instances:\n\n  • git.acme.example (user: alice)\n  • code.community.example (user: alice)\n",
+      stdout:
+        "Authenticated instances:\n\n  • git.acme.example (user: alice)\n  • code.community.example (user: alice)\n",
       stderr: "",
     }));
 
-    const result = await runForgejoSetup({ args: "project", cwd: root, ui: scripted.ui, exec, environment: {} });
+    const result = await runForgejoSetup({
+      args: "project",
+      cwd: root,
+      ui: scripted.ui,
+      exec,
+      environment: {},
+    });
 
     const target = join(root, ".pi", "forgejo.json");
     expect(result).toMatchObject({ scope: "project", target });
     expect(result?.config.servers).toMatchObject({
       work: { hostname: "git.acme.example", credentialProvider: "fgj" },
-      community: { hostname: "code.community.example", credentialProvider: "fgj" },
+      community: {
+        hostname: "code.community.example",
+        credentialProvider: "fgj",
+      },
     });
-    expect(result?.config.dashboard).toMatchObject({ enabled: false, notifications: "off" });
-    expect(exec).toHaveBeenCalledWith("fgj", ["auth", "status"], { cwd: root, timeout: 10_000 });
-    expect(JSON.parse(await readFile(target, "utf8"))).toEqual(result?.config);
+    expect(result?.config.dashboard).toMatchObject({
+      enabled: false,
+      notifications: "off",
+    });
+    expect(exec).toHaveBeenCalledWith("fgj", ["auth", "status"], {
+      cwd: root,
+      timeout: 10_000,
+    });
+    const written = JSON.parse(await readFile(target, "utf8"));
+    expect(written).toEqual(result?.config);
+    expect(written).not.toHaveProperty("allowedMutations");
     scripted.assertComplete();
   });
 
@@ -186,6 +221,7 @@ describe("guided Forgejo setup", () => {
         notifications: "off",
         privacy: "full",
       },
+      allowedMutations: ["pull.merge"],
     };
     await writeFile(target, JSON.stringify(existing), { mode: 0o644 });
     const scripted = scriptedUi([
@@ -205,12 +241,22 @@ describe("guided Forgejo setup", () => {
       cwd: root,
       ui: scripted.ui,
       exec: vi.fn<CommandExecutor>(),
-      environment: { PI_FORGEJO_CONFIG: target, FORGEJO_WORK_TOKEN_V2: "new-token-value" },
+      environment: {
+        PI_FORGEJO_CONFIG: target,
+        FORGEJO_WORK_TOKEN_V2: "new-token-value",
+      },
     });
 
     expect(result?.config.dashboard).toEqual(existing.dashboard);
+    expect(result?.config.allowedMutations).toEqual(existing.allowedMutations);
+    expect(JSON.parse(await readFile(target, "utf8")).allowedMutations).toEqual(
+      existing.allowedMutations,
+    );
     expect(result?.config.servers.work?.tokenEnv).toBe("FORGEJO_WORK_TOKEN_V2");
-    expect(result?.config.servers.work?.remoteHosts).toEqual(["git.work.example", "forgejo-work"]);
+    expect(result?.config.servers.work?.remoteHosts).toEqual([
+      "git.work.example",
+      "forgejo-work",
+    ]);
     expect(await readFile(target, "utf8")).not.toContain("new-token-value");
     expect((await stat(target)).mode & 0o777).toBe(0o600);
     scripted.assertComplete();
@@ -219,13 +265,19 @@ describe("guided Forgejo setup", () => {
   it("does not overwrite a configuration changed while the wizard is open", async () => {
     const root = await temporaryRoot();
     const target = join(root, "forgejo.json");
-    const original = "{\"before\":true}\n";
-    const changed = "{\"changed\":true}\n";
+    const original = '{"before":true}\n';
+    const changed = '{"changed":true}\n';
     await writeFile(target, original);
     await writeFile(target, changed);
-    const config = parseConfig({ servers: { work: { hostname: "git.work.example", credentialProvider: "fgj" } } });
+    const config = parseConfig({
+      servers: {
+        work: { hostname: "git.work.example", credentialProvider: "fgj" },
+      },
+    });
 
-    await expect(writeForgejoConfigAtomic(target, config, original)).rejects.toThrow("changed while setup was open");
+    await expect(
+      writeForgejoConfigAtomic(target, config, original),
+    ).rejects.toThrow("changed before it could be written");
     await expect(readFile(target, "utf8")).resolves.toBe(changed);
   });
 

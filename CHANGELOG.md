@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- Mutation confirmations now offer `Allow once`, session-wide approval, and an explicitly global `Always allow on all servers and repositories`. Saved approvals use stable action keys in `allowedMutations` in the global config only (never a committed project config), are refreshed by active Pi sessions before each mutation, and also enable approved mutations in headless print mode. Config writes use a cross-process lock so concurrent Pi sessions cannot overwrite each other's approvals.
+
 ## [0.4.2] - 2026-08-16
 
 ### Fixed

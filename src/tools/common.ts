@@ -1,6 +1,9 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { apiPath, type ForgejoClient } from "../client.js";
+import { loadGlobalAllowedMutations } from "../config.js";
+import { saveAllowedMutation } from "../config-storage.js";
+import type { MutationApprovalKey } from "../mutation-approvals.js";
 import type { ForgejoRuntime } from "../runtime.js";
 import type {
 	ForgejoComment,
@@ -43,34 +46,31 @@ async function authenticatedUserName(
 	server: string,
 	signal?: AbortSignal,
 ): Promise<string> {
-  const discovered = runtime.capabilities.get(server)?.user.login;
-  if (discovered) return discovered;
+	const discovered = runtime.capabilities.get(server)?.user.login;
+	if (discovered) return discovered;
 	const response = await runtime
 		.client(server)
 		.request<ForgejoUser>("user", signal === undefined ? {} : { signal });
 	if (!response.data.login)
-		throw new Error(
-			`Forgejo ${server} did not return an authenticated username`,
-		);
-  return response.data.login;
+		throw new Error(`Forgejo ${server} did not return an authenticated username`);
+	return response.data.login;
 }
 
 export const repoTargetProperties = {
 	ref: Type.Optional(
 		Type.String({
-			description:
-				"Server-qualified Forgejo reference such as work:org/repo#12",
+			description: "Server-qualified Forgejo reference such as work:org/repo#12",
 		}),
 	),
 	server: Type.Optional(
 		Type.String({ description: "Configured Forgejo server alias" }),
 	),
-  owner: Type.Optional(Type.String({ description: "Repository owner" })),
-  repo: Type.Optional(Type.String({ description: "Repository name" })),
+	owner: Type.Optional(Type.String({ description: "Repository owner" })),
+	repo: Type.Optional(Type.String({ description: "Repository name" })),
 };
 
 export const resourceTargetProperties = {
-  ...repoTargetProperties,
+	...repoTargetProperties,
 	index: Type.Optional(
 		Type.Integer({ minimum: 1, description: "Issue or pull request number" }),
 	),
@@ -81,39 +81,39 @@ const MAX_COMPACT_DETAIL_VALUE_BYTES = 1_000;
 const MAX_COMPACT_DETAIL_FIELDS = 12;
 
 function compactPersistedToolDetails(data: unknown): unknown {
-  let serialized: string | undefined;
-  try {
-    serialized = JSON.stringify(data);
-  } catch {
-    return { detailsTruncated: true, detailsReason: "not JSON-serializable" };
-  }
-  if (serialized === undefined) return data;
-  const originalBytes = Buffer.byteLength(serialized, "utf8");
-  if (originalBytes <= MAX_PERSISTED_TOOL_DETAILS_BYTES) return data;
+	let serialized: string | undefined;
+	try {
+		serialized = JSON.stringify(data);
+	} catch {
+		return { detailsTruncated: true, detailsReason: "not JSON-serializable" };
+	}
+	if (serialized === undefined) return data;
+	const originalBytes = Buffer.byteLength(serialized, "utf8");
+	if (originalBytes <= MAX_PERSISTED_TOOL_DETAILS_BYTES) return data;
 
 	const compact: Record<string, unknown> = Object.create(null) as Record<
 		string,
 		unknown
 	>;
-  let compactFields = 0;
-  if (typeof data === "object" && data !== null && !Array.isArray(data)) {
-    for (const [key, value] of Object.entries(data)) {
-      if (compactFields >= MAX_COMPACT_DETAIL_FIELDS) break;
-      if (Buffer.byteLength(key, "utf8") > 128) continue;
-      try {
-        const candidate = JSON.stringify(value);
+	let compactFields = 0;
+	if (typeof data === "object" && data !== null && !Array.isArray(data)) {
+		for (const [key, value] of Object.entries(data)) {
+			if (compactFields >= MAX_COMPACT_DETAIL_FIELDS) break;
+			if (Buffer.byteLength(key, "utf8") > 128) continue;
+			try {
+				const candidate = JSON.stringify(value);
 				if (
 					candidate !== undefined &&
 					Buffer.byteLength(candidate, "utf8") <= MAX_COMPACT_DETAIL_VALUE_BYTES
 				) {
-          compact[key] = value;
-          compactFields += 1;
-        }
-      } catch {
-        // Skip only the non-serializable field; the compact envelope remains usable.
-      }
-    }
-  }
+					compact[key] = value;
+					compactFields += 1;
+				}
+			} catch {
+				// Skip only the non-serializable field; the compact envelope remains usable.
+			}
+		}
+	}
 	return {
 		...compact,
 		detailsTruncated: true,
@@ -128,30 +128,30 @@ export function toolResult(
 	content: Array<{ type: "text"; text: string }>;
 	details: { data: unknown };
 } {
-  return {
-    content: [{ type: "text", text: summary }],
-    details: { data: compactPersistedToolDetails(data) },
-  };
+	return {
+		content: [{ type: "text", text: summary }],
+		details: { data: compactPersistedToolDetails(data) },
+	};
 }
 
 export interface BoundedText {
-  text: string;
-  truncated: boolean;
-  originalBytes: number;
-  renderedBytes: number;
+	text: string;
+	truncated: boolean;
+	originalBytes: number;
+	renderedBytes: number;
 }
 
 function utf8Prefix(value: string, maximumBytes: number): string {
-  if (maximumBytes <= 0) return "";
-  const bytes = Buffer.from(value, "utf8");
-  if (bytes.byteLength <= maximumBytes) return value;
-  let end = maximumBytes;
-  while (end > 0) {
-    const byte = bytes[end];
-    if (byte === undefined || (byte & 0xc0) !== 0x80) break;
-    end -= 1;
-  }
-  return bytes.subarray(0, end).toString("utf8");
+	if (maximumBytes <= 0) return "";
+	const bytes = Buffer.from(value, "utf8");
+	if (bytes.byteLength <= maximumBytes) return value;
+	let end = maximumBytes;
+	while (end > 0) {
+		const byte = bytes[end];
+		if (byte === undefined || (byte & 0xc0) !== 0x80) break;
+		end -= 1;
+	}
+	return bytes.subarray(0, end).toString("utf8");
 }
 
 export function boundModelText(
@@ -159,27 +159,27 @@ export function boundModelText(
 	maximumBytes: number,
 	notice?: string,
 ): BoundedText {
-  const originalBytes = Buffer.byteLength(value, "utf8");
-  if (originalBytes <= maximumBytes) {
+	const originalBytes = Buffer.byteLength(value, "utf8");
+	if (originalBytes <= maximumBytes) {
 		return {
 			text: value,
 			truncated: false,
 			originalBytes,
 			renderedBytes: originalBytes,
 		};
-  }
-  const suffix = notice ?? `\n\n[output truncated at ${maximumBytes} bytes]`;
-  const suffixBytes = Buffer.byteLength(suffix, "utf8");
-  const text =
-    suffixBytes >= maximumBytes
-      ? utf8Prefix(suffix, maximumBytes)
-      : `${utf8Prefix(value, maximumBytes - suffixBytes)}${suffix}`;
-  return {
-    text,
-    truncated: true,
-    originalBytes,
-    renderedBytes: Buffer.byteLength(text, "utf8"),
-  };
+	}
+	const suffix = notice ?? `\n\n[output truncated at ${maximumBytes} bytes]`;
+	const suffixBytes = Buffer.byteLength(suffix, "utf8");
+	const text =
+		suffixBytes >= maximumBytes
+			? utf8Prefix(suffix, maximumBytes)
+			: `${utf8Prefix(value, maximumBytes - suffixBytes)}${suffix}`;
+	return {
+		text,
+		truncated: true,
+		originalBytes,
+		renderedBytes: Buffer.byteLength(text, "utf8"),
+	};
 }
 
 export function boundModelTextWithSuffix(
@@ -187,27 +187,27 @@ export function boundModelTextWithSuffix(
 	suffix: string,
 	maximumBytes: number,
 ): BoundedText {
-  const complete = `${value}${suffix}`;
-  const originalBytes = Buffer.byteLength(complete, "utf8");
-  if (originalBytes <= maximumBytes) {
+	const complete = `${value}${suffix}`;
+	const originalBytes = Buffer.byteLength(complete, "utf8");
+	if (originalBytes <= maximumBytes) {
 		return {
 			text: complete,
 			truncated: false,
 			originalBytes,
 			renderedBytes: originalBytes,
 		};
-  }
-  const suffixBytes = Buffer.byteLength(suffix, "utf8");
-  const text =
-    suffixBytes >= maximumBytes
-      ? utf8Prefix(suffix, maximumBytes)
-      : `${utf8Prefix(value, maximumBytes - suffixBytes)}${suffix}`;
-  return {
-    text,
-    truncated: true,
-    originalBytes,
-    renderedBytes: Buffer.byteLength(text, "utf8"),
-  };
+	}
+	const suffixBytes = Buffer.byteLength(suffix, "utf8");
+	const text =
+		suffixBytes >= maximumBytes
+			? utf8Prefix(suffix, maximumBytes)
+			: `${utf8Prefix(value, maximumBytes - suffixBytes)}${suffix}`;
+	return {
+		text,
+		truncated: true,
+		originalBytes,
+		renderedBytes: Buffer.byteLength(text, "utf8"),
+	};
 }
 
 export function formatForgejoComment(comment: ForgejoComment): string {
@@ -215,26 +215,26 @@ export function formatForgejoComment(comment: ForgejoComment): string {
 		? `@${comment.user.login}`
 		: comment.original_author || "unknown";
 	const edited =
-		comment.updated_at !== comment.created_at
-			? `, edited ${comment.updated_at}`
-			: "";
+		comment.updated_at === comment.created_at
+			? ""
+			: `, edited ${comment.updated_at}`;
 	const lines = [
 		`Comment ${comment.id} by ${author} at ${comment.created_at}${edited}`,
 		comment.body || "(empty)",
 	];
-  if (comment.assets?.length) {
-    lines.push(
-      `Attachments: ${comment.assets
+	if (comment.assets?.length) {
+		lines.push(
+			`Attachments: ${comment.assets
 				.map((asset) =>
 					asset.browser_download_url
 						? `${asset.name} (${asset.browser_download_url})`
 						: asset.name,
 				)
-        .join(", ")}`,
-    );
-  }
-  if (comment.html_url) lines.push(`URL: ${comment.html_url}`);
-  return lines.join("\n");
+				.join(", ")}`,
+		);
+	}
+	if (comment.html_url) lines.push(`URL: ${comment.html_url}`);
+	return lines.join("\n");
 }
 
 export function assertForgejoCommentTarget(
@@ -247,15 +247,15 @@ export function assertForgejoCommentTarget(
 		comment.pull_request_url,
 		comment.html_url,
 	].flatMap((url) => {
-    const match = url?.match(/\/(?:issues|pulls)\/(\d+)(?:[/?#]|$)/);
-    return match?.[1] ? [Number(match[1])] : [];
-  });
-  if (indexes.includes(index)) return;
-  if (indexes.length === 0) {
+		const match = url?.match(/\/(?:issues|pulls)\/(\d+)(?:[/?#]|$)/);
+		return match?.[1] ? [Number(match[1])] : [];
+	});
+	if (indexes.includes(index)) return;
+	if (indexes.length === 0) {
 		throw new Error(
 			`cannot verify that comment ${comment.id} belongs to ${reference}`,
 		);
-  }
+	}
 	throw new Error(
 		`comment ${comment.id} belongs to #${indexes.join(" or #")}, not ${reference}`,
 	);
@@ -267,60 +267,60 @@ export function formatForgejoReview(review: ForgejoPullReview): string {
 		: review.team?.name
 			? `team:${review.team.name}`
 			: "unknown";
-  const lines = [
-    `Review ${review.id} by ${reviewer} [${review.state}]`,
-    `Commit: ${review.commit_id ?? "unknown"}`,
-    `Submitted: ${review.submitted_at ?? "unknown"}`,
-    `Updated: ${review.updated_at ?? "unknown"}`,
-    `Official: ${review.official === undefined ? "unknown" : review.official ? "yes" : "no"}`,
-    `Stale: ${review.stale ? "yes" : "no"}`,
-    `Dismissed: ${review.dismissed ? "yes" : "no"}`,
-    `Inline comments: ${review.comments_count ?? "unknown"}`,
-    "",
-    "Body:",
-    review.body || "(empty)",
-  ];
-  if (review.html_url) lines.push("", `URL: ${review.html_url}`);
-  return lines.join("\n");
+	const lines = [
+		`Review ${review.id} by ${reviewer} [${review.state}]`,
+		`Commit: ${review.commit_id ?? "unknown"}`,
+		`Submitted: ${review.submitted_at ?? "unknown"}`,
+		`Updated: ${review.updated_at ?? "unknown"}`,
+		`Official: ${review.official === undefined ? "unknown" : review.official ? "yes" : "no"}`,
+		`Stale: ${review.stale ? "yes" : "no"}`,
+		`Dismissed: ${review.dismissed ? "yes" : "no"}`,
+		`Inline comments: ${review.comments_count ?? "unknown"}`,
+		"",
+		"Body:",
+		review.body || "(empty)",
+	];
+	if (review.html_url) lines.push("", `URL: ${review.html_url}`);
+	return lines.join("\n");
 }
 
 export function formatForgejoReviewComment(
 	comment: ForgejoPullReviewComment,
 ): string {
-  const author = comment.user?.login ? `@${comment.user.login}` : "unknown";
+	const author = comment.user?.login ? `@${comment.user.login}` : "unknown";
 	const edited =
-		comment.updated_at !== comment.created_at
-			? `, edited ${comment.updated_at}`
-			: "";
-  const positions = [`current ${comment.position}`];
+		comment.updated_at === comment.created_at
+			? ""
+			: `, edited ${comment.updated_at}`;
+	const positions = [`current ${comment.position}`];
 	if (comment.original_position !== undefined)
 		positions.push(`original ${comment.original_position}`);
-  const lines = [
-    `Inline comment ${comment.id} by ${author} at ${comment.created_at}${edited}`,
-    `File: ${comment.path} (${positions.join(", ")})`,
-    `Commit: ${comment.commit_id}`,
-  ];
+	const lines = [
+		`Inline comment ${comment.id} by ${author} at ${comment.created_at}${edited}`,
+		`File: ${comment.path} (${positions.join(", ")})`,
+		`Commit: ${comment.commit_id}`,
+	];
 	if (comment.original_commit_id)
 		lines.push(`Original commit: ${comment.original_commit_id}`);
-  if (comment.resolver) lines.push(`Resolved by: @${comment.resolver.login}`);
-  if (comment.diff_hunk) lines.push("", "Diff hunk:", comment.diff_hunk);
-  lines.push("", "Comment:", comment.body || "(empty)");
-  if (comment.html_url) lines.push("", `URL: ${comment.html_url}`);
-  return lines.join("\n");
+	if (comment.resolver) lines.push(`Resolved by: @${comment.resolver.login}`);
+	if (comment.diff_hunk) lines.push("", "Diff hunk:", comment.diff_hunk);
+	lines.push("", "Comment:", comment.body || "(empty)");
+	if (comment.html_url) lines.push("", `URL: ${comment.html_url}`);
+	return lines.join("\n");
 }
 
 function timelineActor(event: ForgejoTimelineEvent): string {
-  return event.user?.login ? `@${event.user.login}` : "system";
+	return event.user?.login ? `@${event.user.login}` : "system";
 }
 
 function issueEventReference(event: ForgejoTimelineEvent): string | undefined {
-  const issue = event.ref_issue ?? event.dependent_issue;
-  if (!issue) return undefined;
-  const repository = issue.repository?.full_name;
+	const issue = event.ref_issue ?? event.dependent_issue;
+	if (!issue) return undefined;
+	const repository = issue.repository?.full_name;
 	const reference = repository
 		? `${repository}#${issue.number}`
 		: `#${issue.number}`;
-  return `${reference} ${issue.title}`;
+	return `${reference} ${issue.title}`;
 }
 
 export function formatTimelineEvent(event: ForgejoTimelineEvent): string {
@@ -331,7 +331,7 @@ export function formatTimelineEvent(event: ForgejoTimelineEvent): string {
 	const lines = [
 		`${event.created_at} ${timelineActor(event)} [${event.type} #${event.id}${updated}]`,
 	];
-  if (event.body?.trim()) lines.push(event.body);
+	if (event.body?.trim()) lines.push(event.body);
 	if (event.old_title || event.new_title)
 		lines.push(
 			`Title: ${event.old_title || "(empty)"} -> ${event.new_title || "(empty)"}`,
@@ -340,7 +340,7 @@ export function formatTimelineEvent(event: ForgejoTimelineEvent): string {
 		lines.push(
 			`Ref: ${event.old_ref || "(none)"} -> ${event.new_ref || "(none)"}`,
 		);
-  if (event.label) lines.push(`Label: ${event.label.name}`);
+	if (event.label) lines.push(`Label: ${event.label.name}`);
 	if (event.assignee)
 		lines.push(
 			`Assignee ${event.removed_assignee ? "removed" : "added"}: @${event.assignee.login}`,
@@ -349,76 +349,76 @@ export function formatTimelineEvent(event: ForgejoTimelineEvent): string {
 		lines.push(
 			`Team ${event.removed_assignee ? "removed" : "added"}: ${event.assignee_team.name}`,
 		);
-  if (event.old_milestone || event.milestone) {
+	if (event.old_milestone || event.milestone) {
 		lines.push(
 			`Milestone: ${event.old_milestone?.title ?? "(none)"} -> ${event.milestone?.title ?? "(none)"}`,
 		);
-  }
-  if (event.old_project_id || event.project_id) {
+	}
+	if (event.old_project_id || event.project_id) {
 		lines.push(
 			`Project: ${event.old_project_id || "(none)"} -> ${event.project_id || "(none)"}`,
 		);
-  }
-  if (event.review_id) lines.push(`Review: ${event.review_id}`);
-  if (event.ref_action) lines.push(`Reference action: ${event.ref_action}`);
-  if (event.ref_commit_sha) lines.push(`Commit: ${event.ref_commit_sha}`);
-  const relatedIssue = issueEventReference(event);
-  if (relatedIssue) lines.push(`Related issue: ${relatedIssue}`);
-  if (event.ref_comment) lines.push(`Related comment: ${event.ref_comment.id}`);
+	}
+	if (event.review_id) lines.push(`Review: ${event.review_id}`);
+	if (event.ref_action) lines.push(`Reference action: ${event.ref_action}`);
+	if (event.ref_commit_sha) lines.push(`Commit: ${event.ref_commit_sha}`);
+	const relatedIssue = issueEventReference(event);
+	if (relatedIssue) lines.push(`Related issue: ${relatedIssue}`);
+	if (event.ref_comment) lines.push(`Related comment: ${event.ref_comment.id}`);
 	if (event.tracked_time?.time !== undefined)
 		lines.push(`Tracked time: ${event.tracked_time.time} seconds`);
 	if (event.resolve_doer)
 		lines.push(`Resolved by: @${event.resolve_doer.login}`);
-  if (event.html_url) lines.push(`URL: ${event.html_url}`);
-  return lines.join("\n");
+	if (event.html_url) lines.push(`URL: ${event.html_url}`);
+	return lines.join("\n");
 }
 
 interface TimelinePageDetails {
-  reference: string;
-  page: number;
-  limit: number;
-  items: ForgejoTimelineEvent[];
-  returned: number;
-  hasMore: boolean;
-  truncated: boolean;
-  originalBytes: number;
-  renderedBytes: number;
-  total?: number;
-  nextPage?: number;
+	reference: string;
+	page: number;
+	limit: number;
+	items: ForgejoTimelineEvent[];
+	returned: number;
+	hasMore: boolean;
+	truncated: boolean;
+	originalBytes: number;
+	renderedBytes: number;
+	total?: number;
+	nextPage?: number;
 }
 
 export function timelineToolResult(
-  reference: string,
-  events: ForgejoTimelineEvent[],
-  page: number,
-  limit: number,
-  totalCount: number | undefined,
-  maximumBytes: number,
+	reference: string,
+	events: ForgejoTimelineEvent[],
+	page: number,
+	limit: number,
+	totalCount: number | undefined,
+	maximumBytes: number,
 ): ReturnType<typeof toolResult> {
 	const hasMore =
 		totalCount === undefined
 			? events.length === limit
 			: page * limit < totalCount;
-  const nextPage = hasMore ? page + 1 : undefined;
+	const nextPage = hasMore ? page + 1 : undefined;
 	const body = [
 		`Timeline ${reference} — page ${page}`,
 		...events.map(formatTimelineEvent),
 	].join("\n\n");
-  const footer = (truncated: boolean): string =>
-    [
-      "",
-      `Page: ${page}`,
-      `Returned: ${events.length}`,
-      `Total: ${totalCount ?? "unknown"}`,
-      `Has more: ${hasMore ? "yes" : "no"}`,
-      `Next page: ${nextPage ?? "none"}`,
-      `Truncated: ${truncated ? "yes" : "no"}`,
+	const footer = (truncated: boolean): string =>
+		[
+			"",
+			`Page: ${page}`,
+			`Returned: ${events.length}`,
+			`Total: ${totalCount ?? "unknown"}`,
+			`Has more: ${hasMore ? "yes" : "no"}`,
+			`Next page: ${nextPage ?? "none"}`,
+			`Truncated: ${truncated ? "yes" : "no"}`,
 			...(truncated
 				? [
 						`Recovery: repeat page ${page} with a smaller limit or narrower since/before filters`,
 					]
 				: []),
-    ].join("\n");
+		].join("\n");
 	let bounded = boundModelTextWithSuffix(
 		body,
 		`\n${footer(false)}`,
@@ -426,20 +426,20 @@ export function timelineToolResult(
 	);
 	if (bounded.truncated)
 		bounded = boundModelTextWithSuffix(body, `\n${footer(true)}`, maximumBytes);
-  const details: TimelinePageDetails = {
-    reference,
-    page,
-    limit,
-    items: events,
-    returned: events.length,
-    hasMore,
-    truncated: bounded.truncated,
-    originalBytes: bounded.originalBytes,
-    renderedBytes: bounded.renderedBytes,
-  };
-  if (totalCount !== undefined) details.total = totalCount;
-  if (nextPage !== undefined) details.nextPage = nextPage;
-  return toolResult(bounded.text, details);
+	const details: TimelinePageDetails = {
+		reference,
+		page,
+		limit,
+		items: events,
+		returned: events.length,
+		hasMore,
+		truncated: bounded.truncated,
+		originalBytes: bounded.originalBytes,
+		renderedBytes: bounded.renderedBytes,
+	};
+	if (totalCount !== undefined) details.total = totalCount;
+	if (nextPage !== undefined) details.nextPage = nextPage;
+	return toolResult(bounded.text, details);
 }
 
 type ToolResult = ReturnType<typeof toolResult>;
@@ -470,8 +470,7 @@ export async function createConversationComment(
 	resourceName: "issue" | "pull request",
 	signal?: AbortSignal,
 ): Promise<ToolResult> {
-	if (!body)
-		throw new Error(`body is required to comment on a ${resourceName}`);
+	if (!body) throw new Error(`body is required to comment on a ${resourceName}`);
 	const response = await client.request<ForgejoComment>(commentsPath, {
 		method: "POST",
 		body: { body },
@@ -536,11 +535,12 @@ export async function handleConversationComment(
 	const preview = boundModelText(current.data.body || "(empty)", 2_000);
 	const label = ref.kind === "pull" ? "pull request" : "issue";
 	const marker = ref.kind === "pull" ? "!" : "#";
-	await confirmMutation(
-		ctx,
-		`Delete Forgejo ${label} comment`,
-		`Server: ${ref.server}\nRepository: ${ref.owner}/${ref.repo}\n${ref.kind === "pull" ? "Pull request" : "Issue"}: ${marker}${ref.index}\nComment: ${commentId}\nCurrent comment body:\n${preview.text}`,
-	);
+	await confirmMutation(runtime, ctx, {
+		approval:
+			ref.kind === "pull" ? "comment.pull.delete" : "comment.issue.delete",
+		title: `Delete Forgejo ${label} comment`,
+		message: `Server: ${ref.server}\nRepository: ${ref.owner}/${ref.repo}\n${ref.kind === "pull" ? "Pull request" : "Issue"}: ${marker}${ref.index}\nComment: ${commentId}\nCurrent comment body:\n${preview.text}`,
+	});
 	await client.request<void>(commentPath, {
 		method: "DELETE",
 		...requestSignal(signal),
@@ -759,14 +759,54 @@ export async function handlePlanningMutation<T extends PlanningResource>(
 	);
 }
 
+const ALLOW_ONCE = "Allow once";
+const ALWAYS_THIS_SESSION =
+	"Always allow on all servers and repositories this session";
+const ALWAYS_SAVED =
+	"Always allow on all servers and repositories (save globally)";
+const MUTATION_CANCEL = "Cancel";
+
+interface MutationConfirmation {
+	approval: MutationApprovalKey;
+	title: string;
+	message: string;
+}
+
 export async function confirmMutation(
+	runtime: ForgejoRuntime,
 	ctx: ExtensionContext,
-	title: string,
-	message: string,
+	confirmation: MutationConfirmation,
 ): Promise<void> {
-  if (!ctx.hasUI) throw new Error(`${title} requires interactive confirmation`);
-  const accepted = await ctx.ui.confirm(title, message);
-  if (!accepted) throw new Error(`${title} cancelled by user`);
+	const { approval, title, message } = confirmation;
+	// Persistent (global config) and session approvals apply even without a UI,
+	// so approved mutations also work in print/JSON mode.
+	if (runtime.sessionMutationApprovals.has(approval)) return;
+	const globallyAllowed = await loadGlobalAllowedMutations(
+		runtime.globalConfigPath,
+	);
+	if (globallyAllowed.includes(approval)) return;
+	if (!ctx.hasUI) throw new Error(`${title} requires interactive confirmation`);
+	const choice = await ctx.ui.select(
+		`${title}\n\n${message}\n\nApprove this mutation?`,
+		[ALLOW_ONCE, ALWAYS_THIS_SESSION, ALWAYS_SAVED, MUTATION_CANCEL],
+	);
+	if (choice === ALWAYS_SAVED) {
+		runtime.sessionMutationApprovals.add(approval);
+		try {
+			await saveAllowedMutation(runtime.globalConfigPath, approval);
+		} catch (error) {
+			ctx.ui.notify(
+				`Could not save approval for "${title}": ${
+					error instanceof Error ? error.message : String(error)
+				}. Approved for this session only.`,
+				"warning",
+			);
+		}
+		return;
+	}
+	if (choice === ALWAYS_THIS_SESSION)
+		runtime.sessionMutationApprovals.add(approval);
+	else if (choice !== ALLOW_ONCE) throw new Error(`${title} cancelled by user`);
 }
 
 export function positiveLimit(
@@ -774,6 +814,6 @@ export function positiveLimit(
 	fallback = 20,
 	maximum = 100,
 ): number {
-  if (value === undefined) return fallback;
-  return Math.min(maximum, Math.max(1, value));
+	if (value === undefined) return fallback;
+	return Math.min(maximum, Math.max(1, value));
 }

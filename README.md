@@ -305,6 +305,10 @@ Merge operations:
 4. Ask for interactive confirmation.
 5. Re-fetch readiness and submit the guarded merge request.
 
+### Mutation approvals
+
+Every confirmation dialog offers: `Allow once`, `Always allow on all servers and repositories this session`, `Always allow on all servers and repositories (save globally)`, and `Cancel`. Saved approvals use stable action keys such as `pull.merge` in `allowedMutations` in the [global config](#configuration) only — a committed project config can never pre-approve mutations. Active Pi sessions re-read saved approvals before each mutation, and cross-process locking prevents concurrent sessions from overwriting each other's choices. Approved mutations (saved or session) also run without a UI, so they work in print mode; without an approval, headless sessions still fail closed.
+
 The toolkit does not push local branches through the Forgejo API. Local Git remains the source of truth for branch creation, commits, rebases, and pushes.
 
 ## Forgejo Actions
@@ -348,7 +352,7 @@ Pi packages execute with the same operating-system permissions as Pi. Review pac
 - No automatic retry of mutations
 - Exact server/repository identity for every mutation
 - Comment ownership checks before edit/delete
-- Interactive confirmation for destructive comment deletion, review publication, merges, workflow mutations, and artifact overwrites
+- Interactive confirmation for destructive comment deletion, review publication, merges, workflow mutations, and artifact overwrites; "always allow" approvals persist to global config only, never project config
 - Bounded UTF-8 model output, logs, diffs, timelines, and downloads
 - Watch wake messages restricted to bounded event identifiers, types, actors, review IDs, timestamps, safe status codes, and normalized agent-authored notes; no remote body, title, diff, or raw error text
 

@@ -9,25 +9,25 @@ import { registerReviewTool } from "../src/tools/review.js";
 import type { ResourceRef, ReviewDraft } from "../src/types.js";
 
 interface CapturedTool {
-  execute(
-    toolCallId: string,
-    params: Record<string, unknown>,
-    signal: AbortSignal,
-    onUpdate: undefined,
-    ctx: ExtensionContext,
-  ): Promise<unknown>;
+	execute(
+		toolCallId: string,
+		params: Record<string, unknown>,
+		signal: AbortSignal,
+		onUpdate: undefined,
+		ctx: ExtensionContext,
+	): Promise<unknown>;
 }
 
 function captureReviewTool(runtime: ForgejoRuntime): CapturedTool {
-  let captured: CapturedTool | undefined;
-  const api = {
-    registerTool(definition: CapturedTool) {
-      captured = definition;
-    },
-  } as unknown as ExtensionAPI;
-  registerReviewTool(api, () => runtime);
-  if (!captured) throw new Error("review tool was not registered");
-  return captured;
+	let captured: CapturedTool | undefined;
+	const api = {
+		registerTool(definition: CapturedTool) {
+			captured = definition;
+		},
+	} as unknown as ExtensionAPI;
+	registerReviewTool(api, () => runtime);
+	if (!captured) throw new Error("review tool was not registered");
+	return captured;
 }
 
 function fakeRuntime(heads: string[]) {
@@ -38,44 +38,46 @@ function fakeRuntime(heads: string[]) {
 		kind: "pull",
 		index: 9,
 	};
-  const drafts = new Map<string, ReviewDraft>();
+	const drafts = new Map<string, ReviewDraft>();
 	const request = vi.fn(
 		async (_path: string, options?: { method?: string; body?: unknown }) => {
-    if (options?.method === "POST") {
+			if (options?.method === "POST") {
 				return {
 					data: { id: 77, state: "APPROVED" },
 					status: 200,
 					headers: new Headers(),
 				};
-    }
-    const sha = heads.shift() ?? "same-sha";
-    return {
-      data: {
-        id: 9,
-        number: 9,
-        title: "Change",
-        state: "open",
-        html_url: "https://work.example/acme/app/pulls/9",
-        updated_at: "2026-08-12T10:00:00Z",
-        head: { ref: "feature", sha },
-        base: { ref: "main", sha: "base" },
-      },
-      status: 200,
-      headers: new Headers(),
-    };
+			}
+			const sha = heads.shift() ?? "same-sha";
+			return {
+				data: {
+					id: 9,
+					number: 9,
+					title: "Change",
+					state: "open",
+					html_url: "https://work.example/acme/app/pulls/9",
+					updated_at: "2026-08-12T10:00:00Z",
+					head: { ref: "feature", sha },
+					base: { ref: "main", sha: "base" },
+				},
+				status: 200,
+				headers: new Headers(),
+			};
 		},
 	);
-  const runtime = {
-    resolveResource: () => ref,
+	const runtime = {
+		sessionMutationApprovals: new Set<string>(),
+		globalConfigPath: ".test-no-forgejo-config.json",
+		resolveResource: () => ref,
 		client: () => ({ request }) as unknown as ForgejoClient,
-    draftKey: () => "work:acme/app!9",
-    drafts,
+		draftKey: () => "work:acme/app!9",
+		drafts,
 		dashboard: {
 			refresh: vi.fn(async () => undefined),
 			refreshIfObserved: vi.fn(async () => undefined),
 		},
-  } as unknown as ForgejoRuntime;
-  return { runtime, request, drafts };
+	} as unknown as ForgejoRuntime;
+	return { runtime, request, drafts };
 }
 
 const target = {
@@ -87,11 +89,11 @@ const target = {
 const signal = new AbortController().signal;
 
 describe("forgejo_review submission safety", () => {
-  it("does not publish without interactive confirmation", async () => {
-    const fixture = fakeRuntime(["head-sha", "head-sha"]);
-    const tool = captureReviewTool(fixture.runtime);
-    const noUi = { hasUI: false } as ExtensionContext;
-    await tool.execute("create", target, signal, undefined, noUi);
+	it("does not publish without interactive confirmation", async () => {
+		const fixture = fakeRuntime(["head-sha", "head-sha"]);
+		const tool = captureReviewTool(fixture.runtime);
+		const noUi = { hasUI: false } as ExtensionContext;
+		await tool.execute("create", target, signal, undefined, noUi);
 		await tool.execute(
 			"preview",
 			{ action: "preview", ref: "work:acme/app!9" },
@@ -99,7 +101,7 @@ describe("forgejo_review submission safety", () => {
 			undefined,
 			noUi,
 		);
-    await expect(
+		await expect(
 			tool.execute(
 				"submit",
 				{ action: "submit", ref: "work:acme/app!9" },
@@ -107,12 +109,12 @@ describe("forgejo_review submission safety", () => {
 				undefined,
 				noUi,
 			),
-    ).rejects.toThrow("requires interactive confirmation");
+		).rejects.toThrow("requires interactive confirmation");
 		expect(
 			fixture.request.mock.calls.some((call) => call[1]?.method === "POST"),
 		).toBe(false);
-    expect(fixture.drafts.has("work:acme/app!9")).toBe(true);
-  });
+		expect(fixture.drafts.has("work:acme/app!9")).toBe(true);
+	});
 
 	it("requires replace=true before overwriting an existing draft", async () => {
 		const fixture = fakeRuntime(["head-sha", "head-sha"]);
@@ -134,13 +136,13 @@ describe("forgejo_review submission safety", () => {
 		expect(fixture.drafts.get("work:acme/app!9")?.body).toBe("Replacement");
 	});
 
-  it("requires an explicit preview before submission", async () => {
-    const fixture = fakeRuntime(["head-sha"]);
-    const tool = captureReviewTool(fixture.runtime);
-    const confirm = vi.fn(async () => true);
-    const ui = { hasUI: true, ui: { confirm } } as unknown as ExtensionContext;
-    await tool.execute("create", target, signal, undefined, ui);
-    await expect(
+	it("requires an explicit preview before submission", async () => {
+		const fixture = fakeRuntime(["head-sha"]);
+		const tool = captureReviewTool(fixture.runtime);
+		const select = vi.fn(async () => "Allow once");
+		const ui = { hasUI: true, ui: { select } } as unknown as ExtensionContext;
+		await tool.execute("create", target, signal, undefined, ui);
+		await expect(
 			tool.execute(
 				"submit",
 				{ action: "submit", ref: "work:acme/app!9" },
@@ -148,17 +150,17 @@ describe("forgejo_review submission safety", () => {
 				undefined,
 				ui,
 			),
-    ).rejects.toThrow("must be previewed before submit");
-    expect(confirm).not.toHaveBeenCalled();
-    expect(fixture.request).toHaveBeenCalledOnce();
-  });
+		).rejects.toThrow("must be previewed before submit");
+		expect(select).not.toHaveBeenCalled();
+		expect(fixture.request).toHaveBeenCalledOnce();
+	});
 
-  it("rejects a stale draft before prompting or publishing", async () => {
-    const fixture = fakeRuntime(["old-sha", "new-sha"]);
-    const tool = captureReviewTool(fixture.runtime);
-    const confirm = vi.fn(async () => true);
-    const ui = { hasUI: true, ui: { confirm } } as unknown as ExtensionContext;
-    await tool.execute("create", target, signal, undefined, ui);
+	it("rejects a stale draft before prompting or publishing", async () => {
+		const fixture = fakeRuntime(["old-sha", "new-sha"]);
+		const tool = captureReviewTool(fixture.runtime);
+		const select = vi.fn(async () => "Allow once");
+		const ui = { hasUI: true, ui: { select } } as unknown as ExtensionContext;
+		await tool.execute("create", target, signal, undefined, ui);
 		await tool.execute(
 			"preview",
 			{ action: "preview", ref: "work:acme/app!9" },
@@ -166,7 +168,7 @@ describe("forgejo_review submission safety", () => {
 			undefined,
 			ui,
 		);
-    await expect(
+		await expect(
 			tool.execute(
 				"submit",
 				{ action: "submit", ref: "work:acme/app!9" },
@@ -174,32 +176,34 @@ describe("forgejo_review submission safety", () => {
 				undefined,
 				ui,
 			),
-    ).rejects.toThrow("pull request head changed from old-sha to new-sha");
-    expect(confirm).not.toHaveBeenCalled();
+		).rejects.toThrow("pull request head changed from old-sha to new-sha");
+		expect(select).not.toHaveBeenCalled();
 		expect(
 			fixture.request.mock.calls.some((call) => call[1]?.method === "POST"),
 		).toBe(false);
-  });
+	});
 
-  it("publishes the complete draft only after confirmation", async () => {
-    const fixture = fakeRuntime(["head-sha", "head-sha"]);
-    const tool = captureReviewTool(fixture.runtime);
-		const confirm = vi.fn(async (_title: string, _message: string) => true);
-    const ui = { hasUI: true, ui: { confirm } } as unknown as ExtensionContext;
-    await tool.execute("create", target, signal, undefined, ui);
-    await tool.execute(
-      "comment",
-      {
-        action: "add_inline_comment",
-        ref: "work:acme/app!9",
-        path: "src/auth.ts",
-        body: "This branch skips validation.",
-        new_position: 42,
-      },
-      signal,
-      undefined,
-      ui,
-    );
+	it("publishes the complete draft only after confirmation", async () => {
+		const fixture = fakeRuntime(["head-sha", "head-sha"]);
+		const tool = captureReviewTool(fixture.runtime);
+		const select = vi.fn(
+			async (_prompt: string, _options: string[]) => "Allow once",
+		);
+		const ui = { hasUI: true, ui: { select } } as unknown as ExtensionContext;
+		await tool.execute("create", target, signal, undefined, ui);
+		await tool.execute(
+			"comment",
+			{
+				action: "add_inline_comment",
+				ref: "work:acme/app!9",
+				path: "src/auth.ts",
+				body: "This branch skips validation.",
+				new_position: 42,
+			},
+			signal,
+			undefined,
+			ui,
+		);
 		await tool.execute(
 			"preview",
 			{ action: "preview", ref: "work:acme/app!9" },
@@ -217,14 +221,14 @@ describe("forgejo_review submission safety", () => {
 		const post = fixture.request.mock.calls.find(
 			(call) => call[1]?.method === "POST",
 		);
-    expect(confirm).toHaveBeenCalledOnce();
-		expect(confirm.mock.calls[0]?.[1]).toContain("Summary: Looks correct");
-		expect(confirm.mock.calls[0]?.[1]).toContain(
+		expect(select).toHaveBeenCalledOnce();
+		expect(select.mock.calls[0]?.[0]).toContain("Summary: Looks correct");
+		expect(select.mock.calls[0]?.[0]).toContain(
 			"src/auth.ts:new:42 This branch skips validation.",
 		);
-    expect(post?.[1]?.body).toMatchObject({
-      event: "APPROVE",
-      commit_id: "head-sha",
+		expect(post?.[1]?.body).toMatchObject({
+			event: "APPROVE",
+			commit_id: "head-sha",
 			comments: [
 				{
 					path: "src/auth.ts",
@@ -233,7 +237,7 @@ describe("forgejo_review submission safety", () => {
 					old_position: 0,
 				},
 			],
-    });
-    expect(fixture.drafts.has("work:acme/app!9")).toBe(false);
-  });
+		});
+		expect(fixture.drafts.has("work:acme/app!9")).toBe(false);
+	});
 });

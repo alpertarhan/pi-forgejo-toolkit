@@ -69,6 +69,24 @@ describe("Forgejo configuration", () => {
 		expect(config.dashboard.privacy).toBe("counts-only");
 	});
 
+	it("loads normalized mutation approvals from global config only", () => {
+		const config = parseConfig(
+			{
+				...BASE_CONFIG,
+				allowedMutations: [" pull.merge ", "pull.merge"],
+			},
+			{ allowedMutations: ["issue.close"] },
+		);
+		expect(config.allowedMutations).toEqual(["pull.merge"]);
+		expect(parseConfig(BASE_CONFIG)).not.toHaveProperty("allowedMutations");
+		expect(() => parseConfig({ ...BASE_CONFIG, allowedMutations: [""] })).toThrow(
+			"allowedMutations entries must be non-empty strings",
+		);
+		expect(() =>
+			parseConfig({ ...BASE_CONFIG, allowedMutations: ["unknown"] }),
+		).toThrow("unsupported allowedMutations key: unknown");
+	});
+
 	it("rejects inline secrets and unsafe URLs", () => {
 		expect(() =>
 			parseConfig({

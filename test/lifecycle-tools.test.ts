@@ -105,11 +105,11 @@ const signal = new AbortController().signal;
 const noUi = { hasUI: false } as ExtensionContext;
 
 function confirmedContext(
-	confirm = vi.fn(async (_title: string, _message: string) => true),
-): { ctx: ExtensionContext; confirm: typeof confirm } {
+	select = vi.fn(async (_prompt: string, _options: string[]) => "Allow once"),
+): { ctx: ExtensionContext; select: typeof select } {
 	return {
-		ctx: { hasUI: true, ui: { confirm } } as unknown as ExtensionContext,
-		confirm,
+		ctx: { hasUI: true, ui: { select } } as unknown as ExtensionContext,
+		select,
 	};
 }
 
@@ -121,6 +121,8 @@ function resourceRuntime(
 	) => Promise<ApiResult<unknown>>,
 ): ForgejoRuntime {
 	return {
+		sessionMutationApprovals: new Set<string>(),
+		globalConfigPath: ".test-no-forgejo-config.json",
 		resolveRepo: () => repo,
 		resolveResource: () => ref,
 		client: () => ({ request }) as unknown as ForgejoClient,
@@ -148,12 +150,10 @@ function comment(issue: number) {
 
 describe("issue conversation lifecycle", () => {
 	it("passes issue pagination through and verifies close/reopen state transitions", async () => {
-		const listRequest = vi.fn(
-			async (_path: string, options?: RequestOptions) => {
-				expect(options?.query).toMatchObject({ page: 2, limit: 10 });
-				return apiResult([]);
-			},
-		);
+		const listRequest = vi.fn(async (_path: string, options?: RequestOptions) => {
+			expect(options?.query).toMatchObject({ page: 2, limit: 10 });
+			return apiResult([]);
+		});
 		const listTool = captureTool(
 			registerIssueTool,
 			resourceRuntime(issueRef, listRequest),
@@ -228,7 +228,7 @@ describe("issue conversation lifecycle", () => {
 				ui.ctx,
 			),
 		).rejects.toThrow("belongs to #99");
-		expect(ui.confirm).not.toHaveBeenCalled();
+		expect(ui.select).not.toHaveBeenCalled();
 		expect(request).toHaveBeenCalledOnce();
 
 		targetIssue = 12;
@@ -241,9 +241,9 @@ describe("issue conversation lifecycle", () => {
 				noUi,
 			),
 		).rejects.toThrow("requires interactive confirmation");
-		expect(
-			request.mock.calls.some((call) => call[1]?.method === "DELETE"),
-		).toBe(false);
+		expect(request.mock.calls.some((call) => call[1]?.method === "DELETE")).toBe(
+			false,
+		);
 
 		await tool.execute(
 			"confirmed",
@@ -252,8 +252,8 @@ describe("issue conversation lifecycle", () => {
 			undefined,
 			ui.ctx,
 		);
-		expect(ui.confirm).toHaveBeenCalledOnce();
-		expect(ui.confirm.mock.calls[0]?.[1]).toContain("Current comment body");
+		expect(ui.select).toHaveBeenCalledOnce();
+		expect(ui.select.mock.calls[0]?.[0]).toContain("Current comment body");
 		expect(
 			request.mock.calls.filter((call) => call[1]?.method === "DELETE"),
 		).toHaveLength(1);
@@ -502,14 +502,12 @@ describe("issue and pull metadata mutations", () => {
 
 	it("uses resource-specific label endpoints and preserves pull planning mutations", async () => {
 		const label = { id: 7, name: "security", color: "ff0000" };
-		const issueRequest = vi.fn(
-			async (path: string, options?: RequestOptions) => {
-				if (path === "repos/acme/app/labels") return apiResult([label], 1);
-				expect(path).toBe("repos/acme/app/issues/12/labels");
-				expect(options).toMatchObject({ method: "PUT", body: { labels: [7] } });
-				return apiResult([label]);
-			},
-		);
+		const issueRequest = vi.fn(async (path: string, options?: RequestOptions) => {
+			if (path === "repos/acme/app/labels") return apiResult([label], 1);
+			expect(path).toBe("repos/acme/app/issues/12/labels");
+			expect(options).toMatchObject({ method: "PUT", body: { labels: [7] } });
+			return apiResult([label]);
+		});
 		const issueTool = captureTool(
 			registerIssueTool,
 			resourceRuntime(issueRef, issueRequest),
@@ -522,37 +520,35 @@ describe("issue and pull metadata mutations", () => {
 			noUi,
 		);
 
-		const pullRequest = vi.fn(
-			async (path: string, options?: RequestOptions) => {
-				if (path === "repos/acme/app/labels") return apiResult([label], 1);
-				expect(path).toBe("repos/acme/app/pulls/9");
-				const body = options?.body as {
-					labels?: number[];
-					assignees?: string[];
-				};
-				if (body.labels)
-					expect(options).toMatchObject({
-						method: "PATCH",
-						body: { labels: [7] },
-					});
-				else
-					expect(options).toMatchObject({
-						method: "PATCH",
-						body: { assignees: ["alice"] },
-					});
-				return apiResult({
-					id: 9,
-					number: 9,
-					title: "Safe change",
-					state: "open",
-					updated_at: "2026-08-12T10:00:00Z",
-					head: { ref: "feature", sha: "head-sha" },
-					base: { ref: "main", sha: "base-sha" },
-					labels: body.labels ? [label] : [],
-					assignees: body.assignees?.map((login) => ({ id: 1, login })) ?? [],
+		const pullRequest = vi.fn(async (path: string, options?: RequestOptions) => {
+			if (path === "repos/acme/app/labels") return apiResult([label], 1);
+			expect(path).toBe("repos/acme/app/pulls/9");
+			const body = options?.body as {
+				labels?: number[];
+				assignees?: string[];
+			};
+			if (body.labels)
+				expect(options).toMatchObject({
+					method: "PATCH",
+					body: { labels: [7] },
 				});
-			},
-		);
+			else
+				expect(options).toMatchObject({
+					method: "PATCH",
+					body: { assignees: ["alice"] },
+				});
+			return apiResult({
+				id: 9,
+				number: 9,
+				title: "Safe change",
+				state: "open",
+				updated_at: "2026-08-12T10:00:00Z",
+				head: { ref: "feature", sha: "head-sha" },
+				base: { ref: "main", sha: "base-sha" },
+				labels: body.labels ? [label] : [],
+				assignees: body.assignees?.map((login) => ({ id: 1, login })) ?? [],
+			});
+		});
 		const pullTool = captureTool(
 			registerPullTool,
 			resourceRuntime(pullRef, pullRequest),
@@ -612,7 +608,7 @@ describe("issue and pull metadata mutations", () => {
 			ui.ctx,
 		);
 
-		expect(ui.confirm).toHaveBeenCalledOnce();
+		expect(ui.select).toHaveBeenCalledOnce();
 		expect(request.mock.calls.map((call) => call[1]?.method ?? "GET")).toEqual([
 			"GET",
 			"PATCH",

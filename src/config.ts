@@ -1,6 +1,10 @@
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, resolve } from "node:path";
+import {
+	MUTATION_APPROVAL_KEYS,
+	type MutationApprovalKey,
+} from "./mutation-approvals.js";
 import { NON_FORGEJO_HOSTS } from "./remote-resolver.js";
 import type {
 	DashboardConfig,
@@ -33,6 +37,7 @@ interface RawServerConfig {
 interface RawConfig {
 	servers?: unknown;
 	dashboard?: unknown;
+	allowedMutations?: unknown;
 }
 
 export class ConfigError extends Error {
@@ -293,6 +298,22 @@ function parseDashboard(
 	};
 }
 
+export function parseAllowedMutationKeys(
+	value: unknown,
+): MutationApprovalKey[] {
+	if (value === undefined) return [];
+	if (!Array.isArray(value))
+		throw new ConfigError("allowedMutations must be an array of mutation keys");
+	if (value.some((entry) => typeof entry !== "string" || entry.trim() === ""))
+		throw new ConfigError("allowedMutations entries must be non-empty strings");
+	const keys = (value as string[]).map((entry) => entry.trim());
+	const supported = new Set<string>(MUTATION_APPROVAL_KEYS);
+	const unsupported = keys.find((key) => !supported.has(key));
+	if (unsupported)
+		throw new ConfigError(`unsupported allowedMutations key: ${unsupported}`);
+	return [...new Set(keys)] as MutationApprovalKey[];
+}
+
 export function parseConfig(
 	globalValue: unknown,
 	projectValue: unknown = {},
@@ -327,9 +348,15 @@ export function parseConfig(
 	if (Object.keys(servers).length === 0) {
 		throw new ConfigError("no Forgejo servers configured");
 	}
+	const allowedMutations = parseAllowedMutationKeys(
+		globalConfig.allowedMutations,
+	);
 	return {
 		servers,
 		dashboard: parseDashboard(globalConfig.dashboard, projectConfig.dashboard),
+		// Deliberately global-only: a committed project config must never be able
+		// to pre-approve mutations (merge/close/dispatch) for everyone who clones.
+		...(allowedMutations.length > 0 ? { allowedMutations } : {}),
 	};
 }
 
@@ -342,6 +369,16 @@ async function readJsonIfPresent(path: string): Promise<unknown | undefined> {
 			throw new ConfigError(`invalid JSON in ${path}: ${error.message}`);
 		throw error;
 	}
+}
+
+export async function loadGlobalAllowedMutations(
+	globalConfigPath: string,
+): Promise<readonly string[]> {
+	const value = await readJsonIfPresent(globalConfigPath);
+	if (value === undefined) return [];
+	if (!isObject(value))
+		throw new ConfigError(`${globalConfigPath} must contain a JSON object`);
+	return parseAllowedMutationKeys(value.allowedMutations);
 }
 
 export function configPaths(
