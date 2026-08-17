@@ -18,7 +18,7 @@ export type QueryValue =
 	| undefined;
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
-export const USER_AGENT = "pi-forgejo-toolkit/0.4.2";
+export const USER_AGENT = "pi-forgejo-toolkit/0.5.0";
 
 export function paginationComplete<T>(
 	response: ApiResult<readonly T[]>,
