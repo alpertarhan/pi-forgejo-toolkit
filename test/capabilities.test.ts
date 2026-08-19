@@ -53,6 +53,33 @@ describe("CapabilityRegistry", () => {
 		expect(community.discoverCapabilities).toHaveBeenCalledOnce();
 	});
 
+	it("isolates caller cancellation and aborts discovery only when closed", async () => {
+		let settle: ((value: ForgejoCapabilities) => void) | undefined;
+		let discoverySignal: AbortSignal | undefined;
+		const work = {
+			discoverCapabilities: vi.fn(
+				(signal?: AbortSignal) =>
+					new Promise<ForgejoCapabilities>((resolve) => {
+						discoverySignal = signal;
+						settle = resolve;
+					}),
+			),
+		} as unknown as ForgejoClient;
+		const registry = new CapabilityRegistry(new ForgejoClientPool({ work }));
+		const firstController = new AbortController();
+
+		const first = registry.refreshAlias("work", firstController.signal);
+		const second = registry.refreshAlias("work");
+		firstController.abort(new Error("first caller cancelled"));
+		await expect(first).rejects.toThrow("first caller cancelled");
+		expect(discoverySignal?.aborted).toBe(false);
+		settle?.(capability("work"));
+		await expect(second).resolves.toMatchObject({ server: "work" });
+
+		registry.close();
+		expect(discoverySignal?.aborted).toBe(true);
+	});
+
 	it("drops stale capability values when a forced refresh fails", async () => {
 		const discoverCapabilities = vi
 			.fn<() => Promise<ForgejoCapabilities>>()
@@ -65,9 +92,9 @@ describe("CapabilityRegistry", () => {
 		);
 		await registry.refreshAlias("work");
 
-		await expect(
-			registry.refreshAlias("work", undefined, true),
-		).rejects.toThrow("server unavailable");
+		await expect(registry.refreshAlias("work", undefined, true)).rejects.toThrow(
+			"server unavailable",
+		);
 		expect(registry.snapshot()).toEqual({
 			values: {},
 			errors: { work: "server unavailable" },

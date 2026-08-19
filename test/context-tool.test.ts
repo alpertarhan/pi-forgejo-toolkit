@@ -101,7 +101,7 @@ describe("forgejo dashboard tool", () => {
 		});
 	});
 
-	it("forces explicit capability rediscovery for the requested server", async () => {
+	it("reuses cached identity but forces explicit capability rediscovery", async () => {
 		const tools: CapturedTool[] = [];
 		const api = {
 			registerTool(tool: CapturedTool) {
@@ -137,13 +137,21 @@ describe("forgejo dashboard tool", () => {
 		const signal = new AbortController().signal;
 
 		await context.execute(
+			"whoami",
+			{ action: "whoami", server: "work" },
+			signal,
+			undefined,
+			{ hasUI: false } as ExtensionContext,
+		);
+		expect(refreshAlias).toHaveBeenLastCalledWith("work", signal, false);
+
+		await context.execute(
 			"capabilities",
 			{ action: "capabilities", server: "work" },
 			signal,
 			undefined,
 			{ hasUI: false } as ExtensionContext,
 		);
-
-		expect(refreshAlias).toHaveBeenCalledWith("work", signal, true);
+		expect(refreshAlias).toHaveBeenLastCalledWith("work", signal, true);
 	});
 });

@@ -301,6 +301,7 @@ export function registerNotificationTool(
 
       if (params.action === "mark_all_read") {
         await confirmMutation(runtime, ctx, {
+          signal,
           approval: "notifications.mark-read",
           title: "Mark Forgejo notifications read",
           message: `Servers: ${aliases.join(", ")}\nAction: mark all unread notification threads as read`,

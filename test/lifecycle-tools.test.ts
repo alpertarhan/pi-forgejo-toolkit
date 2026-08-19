@@ -1,3 +1,6 @@
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type {
 	ExtensionAPI,
 	ExtensionContext,
@@ -119,10 +122,11 @@ function resourceRuntime(
 		path: string,
 		options?: RequestOptions,
 	) => Promise<ApiResult<unknown>>,
+	globalConfigPath = ".test-no-forgejo-config.json",
 ): ForgejoRuntime {
 	return {
 		sessionMutationApprovals: new Set<string>(),
-		globalConfigPath: ".test-no-forgejo-config.json",
+		globalConfigPath,
 		resolveRepo: () => repo,
 		resolveResource: () => ref,
 		client: () => ({ request }) as unknown as ForgejoClient,
@@ -257,6 +261,46 @@ describe("issue conversation lifecycle", () => {
 		expect(
 			request.mock.calls.filter((call) => call[1]?.method === "DELETE"),
 		).toHaveLength(1);
+	});
+
+	it("persists global approval and still executes comment deletion", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "forgejo-delete-approval-"));
+		try {
+			const request = vi.fn(async (_path: string, options?: RequestOptions) =>
+				options?.method === "DELETE"
+					? apiResult(undefined)
+					: apiResult(comment(12)),
+			);
+			const runtime = resourceRuntime(
+				issueRef,
+				request,
+				join(dir, "forgejo.json"),
+			);
+			const tool = captureTool(registerIssueTool, runtime);
+			const ui = confirmedContext(
+				vi.fn(
+					async () => "Always allow on all servers and repositories (save globally)",
+				),
+			);
+
+			await tool.execute(
+				"globally-approved-delete",
+				{ action: "delete_comment", ref: "work:acme/app#12", comment_id: 44 },
+				signal,
+				undefined,
+				ui.ctx,
+			);
+
+			expect(
+				request.mock.calls.filter((call) => call[1]?.method === "DELETE"),
+			).toHaveLength(1);
+			expect(
+				JSON.parse(await readFile(runtime.globalConfigPath, "utf8"))
+					.allowedMutations,
+			).toContain("comment.issue.delete");
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
 	});
 
 	it("uses the authenticated username and verifies subscription state after mutation", async () => {

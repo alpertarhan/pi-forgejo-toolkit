@@ -250,7 +250,7 @@ describe("DashboardStore", () => {
 		store.close();
 	});
 
-	it("does not mark an aborted refresh fresh or commit results for the previous repository", async () => {
+	it("restarts an active refresh after the repository changes", async () => {
 		let releaseRuns: ((response: Response) => void) | undefined;
 		const runs = new Promise<Response>((resolve) => {
 			releaseRuns = resolve;
@@ -278,7 +278,7 @@ describe("DashboardStore", () => {
 		releaseRuns?.(jsonResponse({ total_count: 0, workflow_runs: [] }));
 		await refreshing;
 		expect(store.snapshot().activeRepo?.repo).toBe("next");
-		expect(store.snapshot().fetchedAt).toBeUndefined();
+		expect(store.snapshot().fetchedAt).toBeDefined();
 		expect(store.snapshot().refreshing).toBe(false);
 		store.close();
 	});
@@ -290,11 +290,75 @@ describe("DashboardStore", () => {
 		);
 		const controller = new AbortController();
 		controller.abort(new Error("cancelled"));
-		await store.refresh(controller.signal);
+		await expect(store.refresh(controller.signal)).rejects.toThrow("cancelled");
 		expect(store.snapshot().fetchedAt).toBeUndefined();
 		expect(store.snapshot().refreshing).toBe(false);
 		await store.ensureFresh();
 		expect(store.snapshot().fetchedAt).toBeDefined();
+		store.close();
+	});
+
+	it("coalesces overlapping refreshes instead of cancelling the active request", async () => {
+		let releaseRuns: ((response: Response) => void) | undefined;
+		const runs = new Promise<Response>((resolve) => {
+			releaseRuns = resolve;
+		});
+		const fetchImpl = vi.fn<typeof fetch>(async (input) => {
+			const url = new URL(String(input));
+			if (url.pathname.endsWith("/user"))
+				return jsonResponse({ id: 7, login: "alice" });
+			if (
+				url.pathname.endsWith("/repos/issues/search") ||
+				url.pathname.endsWith("/notifications")
+			)
+				return jsonResponse([]);
+			if (url.pathname.endsWith("/actions/runs")) return runs;
+			throw new Error(`unexpected request: ${url}`);
+		});
+		const store = new DashboardStore(clients(fetchImpl, false), 3, {
+			server: "work",
+			owner: "acme",
+			repo: "app",
+		});
+
+		const first = store.refresh();
+		await vi.waitFor(() =>
+			expect(
+				fetchImpl.mock.calls.filter(([input]) =>
+					String(input).includes("/actions/runs"),
+				),
+			).toHaveLength(1),
+		);
+		const second = store.refresh();
+		expect(
+			fetchImpl.mock.calls.filter(([input]) =>
+				String(input).includes("/actions/runs"),
+			),
+		).toHaveLength(1);
+		releaseRuns?.(jsonResponse({ total_count: 0, workflow_runs: [] }));
+		await Promise.all([first, second]);
+		expect(store.snapshot().fetchedAt).toBeDefined();
+		store.close();
+	});
+
+	it("queries only the active server when dashboard scope is current", async () => {
+		const fetchImpl = dashboardFetch({ review: false, failWork: false });
+		const store = new DashboardStore(clients(fetchImpl, true), 3, {
+			server: "work",
+			owner: "acme",
+			repo: "app",
+		});
+		store.setScope("current");
+
+		await store.refresh();
+		expect(Object.keys(store.snapshot().servers)).toEqual(["work"]);
+		expect(
+			vi
+				.mocked(fetchImpl)
+				.mock.calls.every(
+					([input]) => new URL(String(input)).hostname === "work.example",
+				),
+		).toBe(true);
 		store.close();
 	});
 
@@ -342,9 +406,9 @@ describe("DashboardStore", () => {
 		expect(store.snapshot().attention.map((item) => item.index)).not.toEqual(
 			expect.arrayContaining([11, 21, 31]),
 		);
-		expect(
-			renderWidgetLines(store.snapshot(), 100, theme, "full")[1],
-		).toContain("My Open PRs 1");
+		expect(renderWidgetLines(store.snapshot(), 100, theme, "full")[1]).toContain(
+			"My Open PRs 1",
+		);
 		store.close();
 	});
 

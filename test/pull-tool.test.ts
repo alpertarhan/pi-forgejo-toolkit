@@ -31,6 +31,8 @@ interface FixtureOptions {
   reviews?: ForgejoPullReview[];
   reviewPages?: ForgejoPullReview[][];
   requestedReviewers?: Array<{ id: number; login: string }>;
+  title?: string;
+  omitDraft?: boolean;
 }
 
 function capturePullTool(runtime: ForgejoRuntime): CapturedTool {
@@ -76,11 +78,11 @@ function fakeRuntime(options: FixtureOptions = {}) {
           data: {
             id: 9,
             number: 9,
-            title: "Safe change",
+            title: options.title ?? "Safe change",
             state: "open",
             html_url: "https://work.example/acme/app/pulls/9",
             updated_at: "2026-08-12T10:00:00Z",
-            draft: false,
+            ...(options.omitDraft ? {} : { draft: false }),
             mergeable: true,
             merged: false,
             requested_reviewers: options.requestedReviewers ?? [],
@@ -184,6 +186,30 @@ describe("forgejo_pull guarded merge", () => {
         "review still requested from alice",
       ]),
     );
+  });
+
+  it("treats a draft title as draft when Forgejo omits the draft field", async () => {
+    const fixture = fakeRuntime({
+      title: "WIP: risky change",
+      omitDraft: true,
+    });
+    const tool = capturePullTool(fixture.runtime);
+
+    const result = (await tool.execute(
+      "draft-readiness",
+      { action: "readiness", ref: "work:acme/app!9" },
+      signal,
+      undefined,
+      noUi,
+    )) as {
+      details: { data: { ready: boolean; draft: boolean; blockers: string[] } };
+    };
+
+    expect(result.details.data).toMatchObject({
+      ready: false,
+      draft: true,
+      blockers: expect.arrayContaining(["pull request is a draft"]),
+    });
   });
 
   it("paginates reviews when Forgejo clamps the requested page size", async () => {

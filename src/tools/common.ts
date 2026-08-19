@@ -536,6 +536,7 @@ export async function handleConversationComment(
 	const label = ref.kind === "pull" ? "pull request" : "issue";
 	const marker = ref.kind === "pull" ? "!" : "#";
 	await confirmMutation(runtime, ctx, {
+		signal,
 		approval:
 			ref.kind === "pull" ? "comment.pull.delete" : "comment.issue.delete",
 		title: `Delete Forgejo ${label} comment`,
@@ -770,6 +771,7 @@ interface MutationConfirmation {
 	approval: MutationApprovalKey;
 	title: string;
 	message: string;
+	signal?: AbortSignal | undefined;
 }
 
 export async function confirmMutation(
@@ -777,7 +779,8 @@ export async function confirmMutation(
 	ctx: ExtensionContext,
 	confirmation: MutationConfirmation,
 ): Promise<void> {
-	const { approval, title, message } = confirmation;
+	const { approval, title, message, signal } = confirmation;
+	signal?.throwIfAborted();
 	// Persistent (global config) and session approvals apply even without a UI,
 	// so approved mutations also work in print/JSON mode.
 	if (runtime.sessionMutationApprovals.has(approval)) return;
@@ -786,10 +789,17 @@ export async function confirmMutation(
 	);
 	if (globallyAllowed.includes(approval)) return;
 	if (!ctx.hasUI) throw new Error(`${title} requires interactive confirmation`);
-	const choice = await ctx.ui.select(
-		`${title}\n\n${message}\n\nApprove this mutation?`,
-		[ALLOW_ONCE, ALWAYS_THIS_SESSION, ALWAYS_SAVED, MUTATION_CANCEL],
-	);
+	const prompt = `${title}\n\n${message}\n\nApprove this mutation?`;
+	const choices = [
+		ALLOW_ONCE,
+		ALWAYS_THIS_SESSION,
+		ALWAYS_SAVED,
+		MUTATION_CANCEL,
+	];
+	const choice = signal
+		? await ctx.ui.select(prompt, choices, { signal })
+		: await ctx.ui.select(prompt, choices);
+	signal?.throwIfAborted();
 	if (choice === ALWAYS_SAVED) {
 		runtime.sessionMutationApprovals.add(approval);
 		try {

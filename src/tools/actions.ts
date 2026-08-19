@@ -357,6 +357,7 @@ export function registerActionsTool(
 				if (!ref) throw new Error("git_ref is required for dispatch");
 				const inputs = params.inputs ?? {};
 				await confirmMutation(runtime, ctx, {
+					signal,
 					approval: "actions.workflow.dispatch",
 					title: "Dispatch Forgejo workflow",
 					message: [
@@ -411,6 +412,7 @@ export function registerActionsTool(
 					);
 				}
 				await confirmMutation(runtime, ctx, {
+					signal,
 					approval:
 						params.action === "cancel" ? "actions.run.cancel" : "actions.run.rerun",
 					title:
@@ -508,6 +510,7 @@ export function registerActionsTool(
 					throw new Error(`artifact output already exists: ${destination}`);
 				if (exists) {
 					await confirmMutation(runtime, ctx, {
+						signal,
 						approval: "actions.artifact.overwrite",
 						title: "Overwrite Forgejo artifact",
 						message: [

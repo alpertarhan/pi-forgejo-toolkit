@@ -91,6 +91,32 @@ describe("project trust boundaries", () => {
 		expect(Object.keys(trusted.servers)).toEqual(["work", "attacker"]);
 	});
 
+	it("merges an approval-only global file with trusted project servers", async () => {
+		const root = await temporaryDirectory();
+		const project = join(root, "project");
+		const globalConfig = join(root, "global", "forgejo.json");
+		await writeJson(globalConfig, {
+			allowedMutations: ["comment.issue.delete"],
+		});
+		await writeJson(join(project, ".pi", "forgejo.json"), {
+			servers: {
+				work: {
+					baseUrl: "https://forgejo.example",
+					tokenEnv: "FORGEJO_TOKEN",
+				},
+			},
+		});
+
+		const config = await loadConfig(
+			project,
+			{ PI_FORGEJO_CONFIG: globalConfig },
+			{ projectTrusted: true },
+		);
+
+		expect(Object.keys(config.servers)).toEqual(["work"]);
+		expect(config.allowedMutations).toEqual(["comment.issue.delete"]);
+	});
+
 	it("resolves relative fgj config paths against the file that defines the field", async () => {
 		const root = await temporaryDirectory();
 		const project = join(root, "project");
@@ -119,9 +145,7 @@ describe("project trust boundaries", () => {
 			{ PI_FORGEJO_CONFIG: globalConfig },
 			{ projectTrusted: true },
 		);
-		expect(config.servers.work?.fgjConfig).toBe(
-			join(root, "global", "fgj.yaml"),
-		);
+		expect(config.servers.work?.fgjConfig).toBe(join(root, "global", "fgj.yaml"));
 		expect(config.servers.community?.fgjConfig).toBe(
 			join(project, ".pi", "project-fgj.yaml"),
 		);

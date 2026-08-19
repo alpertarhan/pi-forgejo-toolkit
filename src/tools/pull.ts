@@ -313,11 +313,12 @@ async function loadMergeReadiness(
 		...(pull.requested_reviewers_teams ?? []).map((team) => team.name),
 	];
 	const blockers: string[] = [];
+	const draft = pull.draft ?? hasDraftTitlePrefix(pull.title);
 	const merged = pull.merged ?? false;
 	if (merged) blockers.push("pull request is already merged");
 	else if (pull.state !== "open")
 		blockers.push(`pull request state is ${pull.state}`);
-	if (pull.draft) blockers.push("pull request is a draft");
+	if (draft) blockers.push("pull request is a draft");
 	if (pull.mergeable === false)
 		blockers.push("pull request has merge conflicts");
 	if (pull.mergeable === undefined)
@@ -356,7 +357,7 @@ async function loadMergeReadiness(
 		ready: blockers.length === 0,
 		blockers,
 		state: pull.state,
-		draft: pull.draft ?? false,
+		draft,
 		mergeable: pull.mergeable,
 		merged,
 		headSha: pull.head.sha,
@@ -879,6 +880,7 @@ export function registerPullTool(
 					: readyTitle(current.data.title);
 				if (params.action === "mark_ready") {
 					await confirmMutation(runtime, ctx, {
+						signal,
 						approval: "pull.mark-ready",
 						title: "Mark Forgejo pull request ready",
 						message: [
@@ -924,6 +926,7 @@ export function registerPullTool(
 				}
 				if (params.action === "close") {
 					await confirmMutation(runtime, ctx, {
+						signal,
 						approval: "pull.close",
 						title: "Close Forgejo pull request",
 						message: `Server: ${ref.server}\nRepository: ${ref.owner}/${ref.repo}\nPull request: !${ref.index} - ${current.data.title}`,
@@ -1004,6 +1007,7 @@ export function registerPullTool(
 					);
 				const deleteBranch = params.delete_branch ?? false;
 				await confirmMutation(runtime, ctx, {
+					signal,
 					approval: "pull.merge",
 					title: "Merge pull request",
 					message: [

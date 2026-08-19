@@ -344,6 +344,7 @@ export function registerIssueTool(
 			}
 			if (params.action === "close") {
 				await confirmMutation(runtime, ctx, {
+					signal,
 					approval: "issue.close",
 					title: "Close Forgejo issue",
 					message: `Server: ${ref.server}\nRepository: ${ref.owner}/${ref.repo}\nIssue: #${ref.index}`,

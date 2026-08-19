@@ -129,6 +129,7 @@ interface ActiveWatch extends EventWatch {
 	selfLogin?: string;
 	lastState: string;
 	lastMerged: boolean;
+	serverClockOffsetMs: number;
 	pageLimit: number;
 	maxPages: number;
 	nextPollTime?: number;
@@ -159,6 +160,16 @@ const MAX_BACKOFF_MS = 15 * 60_000;
 const MAX_ACTIVE = 20;
 const MAX_HISTORY = 50;
 const MAX_EMITTED_EVENTS = 20;
+const RESOURCE_FILTERS = new Set<WatchFilter>([
+	"closed",
+	"reopened",
+	"merged",
+	"any",
+]);
+
+function needsResource(filters: WatchFilter[]): boolean {
+	return filters.some((filter) => RESOURCE_FILTERS.has(filter));
+}
 
 function positive(
 	value: number | undefined,
@@ -208,9 +219,7 @@ function eventMatches(
 	if (filter === "any") return true;
 	if (filter === "feedback")
 		return (
-			event.type === "comment" ||
-			event.type === "code" ||
-			event.type === "review"
+			event.type === "comment" || event.type === "code" || event.type === "review"
 		);
 	if (filter === "comment") return event.type === "comment";
 	if (filter === "review_comment")
@@ -357,7 +366,8 @@ export class WatchManager {
 						.request<ForgejoUser>("user", requestOptions)
 						.then((result) => result.data.login),
 		]);
-		const scanBefore = responseTimestamp(currentResponse.headers) ?? startedAt;
+		const serverTimestamp = responseTimestamp(currentResponse.headers);
+		const scanBefore = serverTimestamp ?? startedAt;
 		const scanSince = since ?? overlapTimestamp(scanBefore);
 		const scan = await scanTimeline(
 			client,
@@ -406,6 +416,9 @@ export class WatchManager {
 			...(selfLogin === undefined ? {} : { selfLogin }),
 			lastState: current.state,
 			lastMerged: "merged" in current && current.merged === true,
+			serverClockOffsetMs: serverTimestamp
+				? Date.parse(serverTimestamp) - Date.now()
+				: 0,
 			pageLimit,
 			maxPages,
 			nextPollTime: now + pollIntervalMs,
@@ -463,9 +476,8 @@ export class WatchManager {
 	}
 
 	private activeCount(): number {
-		return [...this.watches.values()].filter(
-			(watch) => watch.state === "active",
-		).length;
+		return [...this.watches.values()].filter((watch) => watch.state === "active")
+			.length;
 	}
 
 	private schedule(): void {
@@ -507,7 +519,9 @@ export class WatchManager {
 	}
 
 	private async poll(watch: ActiveWatch): Promise<void> {
-		const localBefore = new Date().toISOString();
+		const calibratedBefore = new Date(
+			Date.now() + watch.serverClockOffsetMs,
+		).toISOString();
 		const fetchSince = overlapTimestamp(watch.cursor.fetchedThrough);
 		watch.fetchSince = fetchSince;
 		const pollController = new AbortController();
@@ -519,10 +533,18 @@ export class WatchManager {
 				once: true,
 			});
 		try {
-			const currentResponse = await watch.client.request<
-				ForgejoIssue | ForgejoPullRequest
-			>(watch.currentPath, { signal: pollController.signal });
-			const before = responseTimestamp(currentResponse.headers) ?? localBefore;
+			const currentResponse = needsResource(watch.filters)
+				? await watch.client.request<ForgejoIssue | ForgejoPullRequest>(
+						watch.currentPath,
+						{ signal: pollController.signal },
+					)
+				: undefined;
+			const serverTimestamp = currentResponse
+				? responseTimestamp(currentResponse.headers)
+				: undefined;
+			if (serverTimestamp)
+				watch.serverClockOffsetMs = Date.parse(serverTimestamp) - Date.now();
+			const before = serverTimestamp ?? calibratedBefore;
 			const scan = await scanTimeline(
 				watch.client,
 				watch.timelinePath,
@@ -549,20 +571,22 @@ export class WatchManager {
 					)
 					.map((event) => event.type),
 			);
-			const resourceMatches = this.transitionLevelMatches(
-				watch,
-				currentResponse.data,
-			).filter((event) => !timelineTransitionTypes.has(event.type));
+			const resourceMatches = currentResponse
+				? this.transitionLevelMatches(watch, currentResponse.data).filter(
+						(event) => !timelineTransitionTypes.has(event.type),
+					)
+				: [];
 			const matches = [...timelineMatches, ...resourceMatches];
 			watch.cursor = nextTimelineCursor(
 				scan.fetchedThrough,
 				watch.cursor,
 				scan.events,
 			);
-			watch.lastState = currentResponse.data.state;
-			watch.lastMerged =
-				"merged" in currentResponse.data &&
-				currentResponse.data.merged === true;
+			if (currentResponse) {
+				watch.lastState = currentResponse.data.state;
+				watch.lastMerged =
+					"merged" in currentResponse.data && currentResponse.data.merged === true;
+			}
 			watch.failures = 0;
 			delete watch.lastError;
 			if (matches.length > 0) this.finishMatched(watch, matches, true);
@@ -602,8 +626,7 @@ export class WatchManager {
 				(event) =>
 					watch.filters.some((filter) => eventMatches(filter, event)) &&
 					(watch.includeSelf ||
-						event.user?.login?.toLowerCase() !==
-							watch.selfLogin?.toLowerCase()),
+						event.user?.login?.toLowerCase() !== watch.selfLogin?.toLowerCase()),
 			)
 			.map(safeEvent);
 	}

@@ -151,6 +151,20 @@ describe("WatchManager", () => {
 		expect(vi.getTimerCount()).toBe(0);
 	});
 
+	it("polls timeline-only filters without refetching the resource", async () => {
+		const { manager, request } = fixture([[event(2)]]);
+		await manager.arm({ ref, filters: ["comment"], pollIntervalMs: 100 });
+
+		await vi.advanceTimersByTimeAsync(100);
+
+		expect(
+			request.mock.calls.filter(
+				([path]) => !String(path).endsWith("/timeline") && path !== "user",
+			),
+		).toHaveLength(1);
+		expect(manager.list()[0]?.state).toBe("matched");
+	});
+
 	it("uses the Forgejo response clock so local clock skew cannot hide events", async () => {
 		const localNow = "2026-08-12T10:10:00.000Z";
 		const serverNow = "2026-08-12T10:00:00.000Z";
@@ -423,7 +437,7 @@ describe("WatchManager", () => {
 			() => ({ request }) as unknown as ForgejoClient,
 			vi.fn(),
 		);
-		await manager.arm({ ref, filters: ["comment"], pollIntervalMs: 100 });
+		await manager.arm({ ref, filters: ["closed"], pollIntervalMs: 100 });
 
 		await vi.advanceTimersByTimeAsync(100);
 
@@ -557,8 +571,7 @@ describe("WatchManager", () => {
 			(path: string, options?: RequestOptions): Promise<ApiResult<unknown>> => {
 				if (path === "user")
 					return Promise.resolve(result({ id: 1, login: "alice" }));
-				if (!path.endsWith("/timeline"))
-					return Promise.resolve(result(current()));
+				if (!path.endsWith("/timeline")) return Promise.resolve(result(current()));
 				timelineCalls += 1;
 				if (timelineCalls === 1) return Promise.resolve(result([]));
 				pendingSignal = options?.signal;

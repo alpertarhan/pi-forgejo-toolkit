@@ -182,7 +182,8 @@ export default function forgejoExtension(pi: ExtensionAPI): void {
 		if (!refreshTimer) {
 			refreshTimer = setInterval(() => {
 				const active = runtime;
-				if (active) runInBackground(ctx, active.dashboard.refresh());
+				if (active && !active.dashboard.snapshot().refreshing)
+					runInBackground(ctx, active.dashboard.refresh());
 			}, current.config.dashboard.refreshSeconds * 1_000);
 			refreshTimer.unref();
 		}
@@ -190,8 +191,7 @@ export default function forgejoExtension(pi: ExtensionAPI): void {
 	};
 
 	pi.registerCommand("fj-setup", {
-		description:
-			"Run the guided Forgejo server, credential, and dashboard setup",
+		description: "Run the guided Forgejo server, credential, and dashboard setup",
 		handler: async (args, ctx) => {
 			if (!ctx.hasUI) throw new Error("/fj-setup requires an interactive UI");
 			const labels: Record<SetupStage, string> = {
@@ -210,12 +210,7 @@ export default function forgejoExtension(pi: ExtensionAPI): void {
 					`setup ${step}/${total} · ${labels[stage]}`,
 				);
 				if (ctx.mode === "tui") {
-					const stages: SetupStage[] = [
-						"scope",
-						"servers",
-						"dashboard",
-						"review",
-					];
+					const stages: SetupStage[] = ["scope", "servers", "dashboard", "review"];
 					ctx.ui.setWidget("forgejo-setup", [
 						`Forgejo Setup  ${step}/${total}`,
 						stages
@@ -254,9 +249,7 @@ export default function forgejoExtension(pi: ExtensionAPI): void {
 	});
 	const forgejoTools = registerForgejoTools(pi, requireRuntime, () => {
 		if (!watchManager)
-			throw new Error(
-				"Forgejo watch manager is unavailable before session start",
-			);
+			throw new Error("Forgejo watch manager is unavailable before session start");
 		return watchManager;
 	});
 
@@ -285,8 +278,7 @@ export default function forgejoExtension(pi: ExtensionAPI): void {
 				if (!ctx.hasUI)
 					throw new Error("server alias is required without an interactive UI");
 				alias =
-					(await ctx.ui.select("Forgejo server", current.clients.aliases())) ??
-					"";
+					(await ctx.ui.select("Forgejo server", current.clients.aliases())) ?? "";
 			}
 			if (!alias) return;
 			const repo = current.selectServer(alias);
@@ -355,7 +347,10 @@ export default function forgejoExtension(pi: ExtensionAPI): void {
 			}
 			if (action !== "on" && action !== "all" && action !== "current")
 				throw new Error("usage: /fj-widget [on|off|all|current]");
-			if (action === "all" || action === "current") widgetScope = action;
+			if (action === "all" || action === "current") {
+				widgetScope = action;
+				requireRuntime().dashboard.setScope(action);
+			}
 			installWidget(ctx);
 			syncDashboardActivity(ctx, true);
 			ctx.ui.notify(`Forgejo widget visible (${widgetScope})`, "info");
@@ -387,8 +382,7 @@ export default function forgejoExtension(pi: ExtensionAPI): void {
 	pi.registerCommand("fj", {
 		description: "Open the interactive Forgejo attention dashboard",
 		handler: async (args, ctx) => {
-			if (ctx.mode !== "tui")
-				throw new Error("/fj dashboard requires TUI mode");
+			if (ctx.mode !== "tui") throw new Error("/fj dashboard requires TUI mode");
 			const current = requireRuntime();
 			runInBackground(ctx, current.dashboard.refresh());
 			let overlay: DashboardOverlay | undefined;
@@ -409,10 +403,7 @@ export default function forgejoExtension(pi: ExtensionAPI): void {
 						async (item: DashboardItem) => {
 							if (item.sourceId === undefined)
 								throw new Error("selected item is not a notification");
-							await markNotificationRead(
-								current.client(item.server),
-								item.sourceId,
-							);
+							await markNotificationRead(current.client(item.server), item.sourceId);
 							await current.dashboard.refresh();
 						},
 						args.trim() || undefined,
@@ -454,8 +445,7 @@ export default function forgejoExtension(pi: ExtensionAPI): void {
 		const currentManager = new WatchManager(
 			(server) => requireRuntime().client(server),
 			(emission) => {
-				if (watchManager === currentManager)
-					sendWatchNotification(pi, emission);
+				if (watchManager === currentManager) sendWatchNotification(pi, emission);
 			},
 		);
 		watchManager = currentManager;

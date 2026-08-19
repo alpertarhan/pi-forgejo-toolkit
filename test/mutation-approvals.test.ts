@@ -53,8 +53,9 @@ function confirm(
 	approval: MutationApprovalKey,
 	title: string,
 	message: string,
+	signal?: AbortSignal,
 ): Promise<void> {
-	return confirmMutation(runtime, ctx, { approval, title, message });
+	return confirmMutation(runtime, ctx, { approval, title, message, signal });
 }
 
 const noUi = { hasUI: false } as ExtensionContext;
@@ -161,6 +162,43 @@ describe("mutation approval flow", () => {
 		await expect(
 			confirm(runtime(), context(undefined).ctx, APPROVAL, nextTitle(), "details"),
 		).rejects.toThrow("cancelled by user");
+	});
+
+	it("cancels an open confirmation with the tool signal", async () => {
+		const controller = new AbortController();
+		const select = vi.fn(
+			async (
+				_prompt: string,
+				_choices: string[],
+				options: { signal?: AbortSignal },
+			) =>
+				new Promise<string>((_resolve, reject) => {
+					options.signal?.addEventListener(
+						"abort",
+						() => reject(options.signal?.reason),
+						{ once: true },
+					);
+				}),
+		);
+		const ctx = {
+			hasUI: true,
+			ui: { select, notify: vi.fn() },
+		} as unknown as ExtensionContext;
+		const session = runtime();
+
+		const confirmation = confirm(
+			session,
+			ctx,
+			APPROVAL,
+			nextTitle(),
+			"details",
+			controller.signal,
+		);
+		await vi.waitFor(() => expect(select).toHaveBeenCalledOnce());
+		controller.abort(new Error("tool cancelled"));
+
+		await expect(confirmation).rejects.toThrow("tool cancelled");
+		expect(session.sessionMutationApprovals).not.toContain(APPROVAL);
 	});
 
 	it("saves an always-allowed mutation to the global config", async () => {

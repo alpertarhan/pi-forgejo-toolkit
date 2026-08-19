@@ -173,6 +173,7 @@ export class ForgejoRuntime {
 
   close(): void {
     this.dashboard.close();
+    this.capabilities.close();
     this.clients.clearCredentials();
     this.drafts.clear();
     this.conversationCursors.clear();
@@ -221,6 +222,7 @@ export async function createRuntime(
     (alias) => capabilities.get(alias)?.user,
     (alias) => capabilities.get(alias)?.features.actionsRuns ?? "unknown",
   );
+  dashboard.setScope(config.dashboard.scope);
   return new ForgejoRuntime(
     cwd,
     config,

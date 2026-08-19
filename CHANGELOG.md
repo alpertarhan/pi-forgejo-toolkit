@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- Dashboard refreshes now coalesce without cancelling active work, `current` scope limits server polling, timeline-only watches avoid redundant resource requests, and cached identity lookup no longer forces Swagger rediscovery.
+
+### Fixed
+
+- Fixed shared credential and capability cancellation leaking between callers, session shutdown leaving discovery work alive, mutation prompts ignoring tool cancellation, and title-prefixed draft pull requests bypassing merge readiness.
+
 ## [0.5.0] - 2026-08-17
 
 ### Added

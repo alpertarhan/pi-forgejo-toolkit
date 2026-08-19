@@ -250,6 +250,7 @@ export function registerReviewTool(
         );
       }
       await confirmMutation(runtime, ctx, {
+        signal,
         approval: "review.submit",
         title: "Submit Forgejo review",
         message: draftSummary(draft),
