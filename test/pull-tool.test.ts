@@ -31,6 +31,8 @@ interface FixtureOptions {
   reviews?: ForgejoPullReview[];
   reviewPages?: ForgejoPullReview[][];
   requestedReviewers?: Array<{ id: number; login: string }>;
+  blockOnOfficialReviewRequests?: boolean;
+  blockOnRejectedReviews?: boolean;
   title?: string;
   omitDraft?: boolean;
 }
@@ -101,6 +103,9 @@ function fakeRuntime(options: FixtureOptions = {}) {
             protected: (options.requiredApprovals ?? 0) > 0,
             enable_status_check: true,
             required_approvals: options.requiredApprovals ?? 0,
+            block_on_rejected_reviews: options.blockOnRejectedReviews ?? false,
+            block_on_official_review_requests:
+              options.blockOnOfficialReviewRequests ?? false,
             status_check_contexts: ["ci"],
             user_can_merge: true,
           },
@@ -155,6 +160,8 @@ describe("forgejo_pull guarded merge", () => {
     const fixture = fakeRuntime({
       checkState: "failure",
       requiredApprovals: 1,
+      blockOnRejectedReviews: true,
+      blockOnOfficialReviewRequests: true,
       requestedReviewers: [{ id: 3, login: "alice" }],
       reviews: [
         {
@@ -226,6 +233,7 @@ describe("forgejo_pull guarded merge", () => {
     );
     const fixture = fakeRuntime({
       requiredApprovals: 1,
+      blockOnRejectedReviews: true,
       reviewPages: [
         oldApprovals,
         [
@@ -257,6 +265,61 @@ describe("forgejo_pull guarded merge", () => {
         .filter((call) => String(call[0]).endsWith("/reviews"))
         .map((call) => call[1]?.query?.page),
     ).toEqual([1, 2, 3]);
+  });
+
+  it("does not block on advisory review requests when branch protection allows", async () => {
+    const fixture = fakeRuntime({
+      requestedReviewers: [{ id: 3, login: "alice" }],
+      reviews: [
+        {
+          id: 7,
+          user: { id: 4, login: "bob" },
+          state: "REQUEST_CHANGES",
+          official: true,
+          commit_id: "head-sha",
+        },
+      ],
+    });
+    const tool = capturePullTool(fixture.runtime);
+
+    const result = (await tool.execute(
+      "advisory-readiness",
+      { action: "readiness", ref: "work:acme/app!9" },
+      signal,
+      undefined,
+      noUi,
+    )) as { details: { data: { ready: boolean; blockers: string[] } } };
+
+    expect(result.details.data.ready).toBe(true);
+    expect(result.details.data.blockers).toEqual([]);
+  });
+
+  it("treats an outstanding request as answered once that reviewer has a current review", async () => {
+    const fixture = fakeRuntime({
+      blockOnOfficialReviewRequests: true,
+      requestedReviewers: [{ id: 4, login: "bob" }],
+      reviews: [
+        {
+          id: 7,
+          user: { id: 4, login: "bob" },
+          state: "APPROVED",
+          official: true,
+          commit_id: "head-sha",
+        },
+      ],
+    });
+    const tool = capturePullTool(fixture.runtime);
+
+    const result = (await tool.execute(
+      "answered-request-readiness",
+      { action: "readiness", ref: "work:acme/app!9" },
+      signal,
+      undefined,
+      noUi,
+    )) as { details: { data: { ready: boolean; blockers: string[] } } };
+
+    expect(result.details.data.ready).toBe(true);
+    expect(result.details.data.blockers).toEqual([]);
   });
 
   it("blocks failed checks before asking for confirmation", async () => {
