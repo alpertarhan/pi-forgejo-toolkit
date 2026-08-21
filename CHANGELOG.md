@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-08-21
+
+### Fixed
+
+- `forgejo_review` submit no longer lands approvals as PENDING reviews: the verdict enum now matches the Forgejo API event values (`APPROVED`), and a submit whose review stays PENDING is rejected loudly with the created review id instead of pretending success (#8).
+- `forgejo_pull` readiness/merge no longer blocks merges the server allows: outstanding review requests only block when branch protection sets `block_on_official_review_requests`, and a request from a reviewer with a current review counts as answered. Requested changes likewise only block under `block_on_rejected_reviews`, and `remove_reviewers` verification failures now surface the accepted HTTP status (#9).
+
 ## [0.5.1] - 2026-08-19
 
 ### Changed
