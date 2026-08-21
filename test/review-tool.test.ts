@@ -30,7 +30,7 @@ function captureReviewTool(runtime: ForgejoRuntime): CapturedTool {
 	return captured;
 }
 
-function fakeRuntime(heads: string[]) {
+function fakeRuntime(heads: string[], postState = "APPROVED") {
 	const ref: ResourceRef = {
 		server: "work",
 		owner: "acme",
@@ -43,7 +43,7 @@ function fakeRuntime(heads: string[]) {
 		async (_path: string, options?: { method?: string; body?: unknown }) => {
 			if (options?.method === "POST") {
 				return {
-					data: { id: 77, state: "APPROVED" },
+					data: { id: 77, state: postState },
 					status: 200,
 					headers: new Headers(),
 				};
@@ -83,7 +83,7 @@ function fakeRuntime(heads: string[]) {
 const target = {
 	action: "create_draft",
 	ref: "work:acme/app!9",
-	verdict: "APPROVE",
+	verdict: "APPROVED",
 	body: "Looks correct",
 };
 const signal = new AbortController().signal;
@@ -227,7 +227,7 @@ describe("forgejo_review submission safety", () => {
 			"src/auth.ts:new:42 This branch skips validation.",
 		);
 		expect(post?.[1]?.body).toMatchObject({
-			event: "APPROVE",
+			event: "APPROVED",
 			commit_id: "head-sha",
 			comments: [
 				{
@@ -239,5 +239,30 @@ describe("forgejo_review submission safety", () => {
 			],
 		});
 		expect(fixture.drafts.has("work:acme/app!9")).toBe(false);
+	});
+
+	it("rejects a review that stays PENDING after submit", async () => {
+		const fixture = fakeRuntime(["head-sha", "head-sha"], "PENDING");
+		const tool = captureReviewTool(fixture.runtime);
+		const select = vi.fn(async () => "Allow once");
+		const ui = { hasUI: true, ui: { select } } as unknown as ExtensionContext;
+		await tool.execute("create", target, signal, undefined, ui);
+		await tool.execute(
+			"preview",
+			{ action: "preview", ref: "work:acme/app!9" },
+			signal,
+			undefined,
+			ui,
+		);
+		await expect(
+			tool.execute(
+				"submit",
+				{ action: "submit", ref: "work:acme/app!9" },
+				signal,
+				undefined,
+				ui,
+			),
+		).rejects.toThrow("stayed PENDING");
+		expect(fixture.drafts.has("work:acme/app!9")).toBe(true);
 	});
 });

@@ -26,7 +26,7 @@ description: "Review a Forgejo pull request using metadata, diff, checks, review
 9. Choose a verdict:
    - `REQUEST_CHANGES` for one or more blocking defects.
    - `COMMENT` for non-blocking findings or questions.
-   - `APPROVE` only when no blocking defect remains.
+   - `APPROVED` only when no blocking defect remains.
 10. Call `forgejo_review` with `create_draft`. Write a concise body that leads with findings and includes the reviewed head SHA.
 11. Add each actionable inline finding with `add_inline_comment`, using the changed file path and correct new or old line position.
 12. Call `forgejo_review` with `preview`. Present the complete verdict, summary, and inline comments to the user.

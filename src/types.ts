@@ -535,7 +535,7 @@ export interface ReviewDraftComment {
 export interface ReviewDraft {
   ref: ResourceRef;
   body: string;
-  verdict: "COMMENT" | "APPROVE" | "REQUEST_CHANGES";
+  verdict: "COMMENT" | "APPROVED" | "REQUEST_CHANGES";
   commitId?: string;
   comments: ReviewDraftComment[];
   createdAt: string;

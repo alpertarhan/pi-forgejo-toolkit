@@ -63,7 +63,7 @@ export function registerReviewTool(
       ...resourceTargetProperties,
       review_id: Type.Optional(Type.Integer({ minimum: 1 })),
       verdict: Type.Optional(
-        StringEnum(["COMMENT", "APPROVE", "REQUEST_CHANGES"] as const),
+        StringEnum(["COMMENT", "APPROVED", "REQUEST_CHANGES"] as const),
       ),
       body: Type.Optional(Type.String()),
       replace: Type.Optional(
@@ -261,7 +261,7 @@ export function registerReviewTool(
         new_position: comment.newPosition ?? 0,
         old_position: comment.oldPosition ?? 0,
       }));
-      const response = await client.request<unknown>(reviewsPath, {
+      const response = await client.request<ForgejoPullReview>(reviewsPath, {
         ...requestOptions,
         method: "POST",
         body: {
@@ -271,6 +271,11 @@ export function registerReviewTool(
           comments,
         },
       });
+      if (response.data.state === "PENDING") {
+        throw new Error(
+          `review for ${reference} was created but stayed PENDING — the server did not apply the verdict; the draft was kept, inspect review ${response.data.id}`,
+        );
+      }
       runtime.drafts.delete(key);
       await runtime.dashboard.refreshIfObserved(signal);
       return toolResult(
