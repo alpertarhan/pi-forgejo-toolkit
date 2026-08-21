@@ -399,6 +399,8 @@ export interface ForgejoBranch {
   protected: boolean;
   enable_status_check: boolean;
   required_approvals: number;
+  block_on_rejected_reviews?: boolean;
+  block_on_official_review_requests?: boolean;
   status_check_contexts?: string[];
   user_can_merge: boolean;
 }

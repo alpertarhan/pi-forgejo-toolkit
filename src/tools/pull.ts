@@ -308,10 +308,11 @@ async function loadMergeReadiness(
 	const changesRequested = currentReviews
 		.filter((review) => review.state.toUpperCase() === "REQUEST_CHANGES")
 		.map(reviewerName);
+	const reviewedNames = new Set(currentReviews.map(reviewerName));
 	const requested = [
 		...(pull.requested_reviewers ?? []).map((user) => user.login),
 		...(pull.requested_reviewers_teams ?? []).map((team) => team.name),
-	];
+	].filter((name) => !reviewedNames.has(name));
 	const blockers: string[] = [];
 	const draft = pull.draft ?? hasDraftTitlePrefix(pull.title);
 	const merged = pull.merged ?? false;
@@ -343,14 +344,14 @@ async function loadMergeReadiness(
 				blockers.push(`required check '${context}' is ${status.status}`);
 		}
 	}
-	if (changesRequested.length > 0)
+	if (changesRequested.length > 0 && branch.block_on_rejected_reviews)
 		blockers.push(`changes requested by ${changesRequested.join(", ")}`);
 	if (approvals.length < branch.required_approvals) {
 		blockers.push(
 			`requires ${branch.required_approvals} approvals; found ${approvals.length}`,
 		);
 	}
-	if (requested.length > 0)
+	if (requested.length > 0 && branch.block_on_official_review_requests)
 		blockers.push(`review still requested from ${requested.join(", ")}`);
 
 	return {
@@ -820,7 +821,7 @@ export function registerPullTool(
 						current.data,
 					);
 				}
-				await client.request(`${pullPath}/requested_reviewers`, {
+				const change = await client.request(`${pullPath}/requested_reviewers`, {
 					...requestOptions,
 					method: requesting ? "POST" : "DELETE",
 					body: { reviewers: changedReviewers, team_reviewers: changedTeams },
@@ -848,7 +849,7 @@ export function registerPullTool(
 				];
 				if (unverified.length > 0) {
 					throw new Error(
-						`Forgejo did not ${requesting ? "request" : "remove"} review for ${unverified.join(", ")} on ${reference}`,
+						`Forgejo accepted the review request change (HTTP ${change.status}) but ${unverified.join(", ")} did not take effect on ${reference}; Forgejo can keep a request whose reviewer already submitted a review`,
 					);
 				}
 				await runtime.dashboard.refreshIfObserved(signal);
